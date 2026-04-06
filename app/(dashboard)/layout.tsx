@@ -1,34 +1,59 @@
-// app/(dashboard)/settings/layout.tsx
+// app/(dashboard)/layout.tsx
 import { createClient } from '@/supabase/server'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
+import { SidebarClient } from '@/components/sidebar-client'
 
-const TABS = [
-  { href: '/settings/projects',    label: 'Proyek' },
-  { href: '/settings/categories',  label: 'Kategori' },
-  { href: '/settings/vendors',     label: 'Vendor' },
-  { href: '/settings/employees',   label: 'Karyawan' },
-]
-
-export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || me.role !== 'owner') redirect('/expenses')
+
+  const { data: me } = await supabase
+    .from('employees')
+    .select('full_name, role')
+    .eq('email', user.email ?? '')
+    .single()
+
+  if (!me) redirect('/login')
 
   return (
-    <div style={{ padding: '24px 20px', maxWidth: '1000px' }}>
-      <h1 style={{ fontSize: '18px', fontWeight: '600', color: '#0F172A', margin: '0 0 20px' }}>Pengaturan</h1>
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '24px', borderBottom: '1px solid #E2E8F0', paddingBottom: '0' }}>
-        {TABS.map(t => (
-          <Link key={t.href} href={t.href} style={{ padding: '8px 16px', fontSize: '13px', fontWeight: '500', color: '#64748B', textDecoration: 'none', borderBottom: '2px solid transparent', marginBottom: '-1px' }}
-            className="settings-tab">
-            {t.label}
-          </Link>
-        ))}
-      </div>
-      {children}
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#F8FAFC' }}>
+      {/* Sidebar */}
+      <SidebarClient
+        userName={me.full_name ?? user.email ?? 'User'}
+        userRole={me.role ?? 'staff'}
+      />
+
+      {/* Main Content */}
+      <main style={{
+        marginLeft: '220px',
+        flex: 1,
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        {/* Top bar */}
+        <div style={{
+          height: '56px',
+          background: '#FFFFFF',
+          borderBottom: '1px solid #E2E8F0',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 24px',
+          position: 'sticky',
+          top: 0,
+          zIndex: 40,
+        }}>
+          <div style={{ fontSize: '13px', color: '#94A3B8' }}>
+            Selamat datang, <span style={{ color: '#0F172A', fontWeight: '500' }}>{me.full_name ?? user.email}</span>
+          </div>
+        </div>
+
+        {/* Page content */}
+        <div style={{ padding: '24px', flex: 1 }}>
+          {children}
+        </div>
+      </main>
     </div>
   )
 }
