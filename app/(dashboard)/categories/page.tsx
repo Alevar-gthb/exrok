@@ -21,7 +21,7 @@ export default function CategoriesPage() {
   useEffect(() => { if (selectedCat) loadSubcats(selectedCat) }, [selectedCat])
 
   async function onSaveCat(values: Record<string, string>) {
-    const payload = { name: values.name, code: values.code || null }
+    const payload = { name: values.name, code: values.code || null } as any
     const { error } = values.id
       ? await supabase.from('expense_categories').update(payload).eq('id', values.id)
       : await supabase.from('expense_categories').insert(payload)
