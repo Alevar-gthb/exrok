@@ -2,21 +2,42 @@
 
 // ============================================================
 // src/components/sidebar-client.tsx
-// Sidebar navigasi Exrok — client component (hover states, logout)
+// Sidebar navigasi Exrok — client component (hover states, logout, submenu)
 // ============================================================
 
+import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/supabase/client'
 import type { UserRole } from '@/types/database.types'
+
+interface SubItem {
+  href: string
+  label: string
+  roles: UserRole[]
+}
 
 interface NavItem {
   href: string
   label: string
   icon: React.ReactNode
-  roles: UserRole[] // siapa yang boleh lihat item ini
+  roles: UserRole[]
+  children?: SubItem[]
 }
 
 const NAV: NavItem[] = [
+  {
+    href: '/expenses',
+    label: 'Dashboard',
+    roles: ['owner', 'finance', 'ga', 'staff'],
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+        <rect x="9" y="1" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+        <rect x="1" y="9" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+        <rect x="9" y="9" width="6" height="6" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+      </svg>
+    ),
+  },
   {
     href: '/expenses',
     label: 'Expense',
@@ -28,6 +49,9 @@ const NAV: NavItem[] = [
         <path d="M5 10h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
       </svg>
     ),
+    children: [
+      { href: '/categories', label: 'Expense Categories', roles: ['owner', 'finance', 'ga'] },
+    ],
   },
   {
     href: '/inventory',
@@ -52,6 +76,18 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    href: '/vendors',
+    label: 'Vendor',
+    roles: ['owner', 'finance', 'ga'],
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M2 13V6l6-4 6 4v7" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <rect x="5" y="8" width="3" height="5" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+        <rect x="9" y="8" width="2" height="3" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+      </svg>
+    ),
+  },
+  {
     href: '/reports',
     label: 'Laporan',
     roles: ['owner', 'finance'],
@@ -72,6 +108,9 @@ const NAV: NavItem[] = [
         <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
       </svg>
     ),
+    children: [
+      { href: '/settings/projects', label: 'Master Data', roles: ['owner'] },
+    ],
   },
 ]
 
@@ -84,6 +123,18 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+
+  // Track which parent menus are open
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {}
+    NAV.forEach(item => {
+      if (item.children) {
+        const childActive = item.children.some(c => pathname.startsWith(c.href))
+        if (childActive) initial[item.href + item.label] = true
+      }
+    })
+    return initial
+  })
 
   const visibleNav = NAV.filter(item =>
     item.roles.includes(userRole as UserRole)
@@ -104,6 +155,22 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
   async function handleLogout() {
     await supabase.auth.signOut()
     router.replace('/login')
+  }
+
+  function toggleMenu(key: string) {
+    setOpenMenus(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  function navItemStyle(active: boolean): React.CSSProperties {
+    return {
+      display: 'flex', alignItems: 'center', gap: '10px',
+      padding: '8px 10px', borderRadius: '8px', marginBottom: '2px',
+      fontSize: '13px', fontWeight: active ? '500' : '400',
+      color: active ? '#F1F5F9' : '#94A3B8',
+      background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
+      textDecoration: 'none', transition: 'all .15s', cursor: 'pointer',
+      width: '100%', border: 'none', textAlign: 'left',
+    }
   }
 
   return (
@@ -138,36 +205,141 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
         <div style={{ fontSize: '10px', fontWeight: '500', color: '#475569', letterSpacing: '.06em', textTransform: 'uppercase', padding: '0 8px', marginBottom: '6px' }}>
           Menu
         </div>
+
         {visibleNav.map(item => {
-          const active = pathname.startsWith(item.href)
+          const key = item.href + item.label
+          const hasChildren = item.children && item.children.length > 0
+          const isOpen = openMenus[key] ?? false
+          const active = !hasChildren && pathname === item.href
+          const parentActive = hasChildren
+            ? (item.children!.some(c => pathname.startsWith(c.href)) || pathname === item.href)
+            : false
+
           return (
-            <a
-              key={item.href}
-              href={item.href}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '10px',
-                padding: '8px 10px', borderRadius: '8px', marginBottom: '2px',
-                fontSize: '13px', fontWeight: active ? '500' : '400',
-                color: active ? '#F1F5F9' : '#94A3B8',
-                background: active ? 'rgba(255,255,255,0.08)' : 'transparent',
-                textDecoration: 'none', transition: 'all .15s',
-              }}
-              onMouseEnter={e => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'
-                  ;(e.currentTarget as HTMLElement).style.color = '#CBD5E1'
-                }
-              }}
-              onMouseLeave={e => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = 'transparent'
-                  ;(e.currentTarget as HTMLElement).style.color = '#94A3B8'
-                }
-              }}
-            >
-              <span style={{ opacity: active ? 1 : 0.7 }}>{item.icon}</span>
-              {item.label}
-            </a>
+            <div key={key}>
+              {/* Parent item */}
+              {hasChildren ? (
+                <button
+                  onClick={() => toggleMenu(key)}
+                  style={{
+                    ...navItemStyle(parentActive),
+                    justifyContent: 'space-between',
+                  }}
+                  onMouseEnter={e => {
+                    if (!parentActive) {
+                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'
+                      ;(e.currentTarget as HTMLElement).style.color = '#CBD5E1'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!parentActive) {
+                      (e.currentTarget as HTMLElement).style.background = 'transparent'
+                      ;(e.currentTarget as HTMLElement).style.color = '#94A3B8'
+                    }
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ opacity: parentActive ? 1 : 0.7 }}>{item.icon}</span>
+                    {item.label}
+                  </span>
+                  {/* Chevron */}
+                  <svg
+                    width="12" height="12" viewBox="0 0 12 12" fill="none"
+                    style={{ transition: 'transform .2s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', flexShrink: 0 }}
+                  >
+                    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              ) : (
+                <a
+                  href={item.href}
+                  style={navItemStyle(active)}
+                  onMouseEnter={e => {
+                    if (!active) {
+                      (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'
+                      ;(e.currentTarget as HTMLElement).style.color = '#CBD5E1'
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!active) {
+                      (e.currentTarget as HTMLElement).style.background = 'transparent'
+                      ;(e.currentTarget as HTMLElement).style.color = '#94A3B8'
+                    }
+                  }}
+                >
+                  <span style={{ opacity: active ? 1 : 0.7 }}>{item.icon}</span>
+                  {item.label}
+                </a>
+              )}
+
+              {/* Submenu */}
+              {hasChildren && isOpen && (
+                <div style={{ marginBottom: '4px' }}>
+                  {/* Parent link first */}
+                  <a
+                    href={item.href}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px',
+                      padding: '6px 10px 6px 36px', borderRadius: '6px',
+                      fontSize: '12px', color: pathname === item.href ? '#F1F5F9' : '#64748B',
+                      background: pathname === item.href ? 'rgba(255,255,255,0.06)' : 'transparent',
+                      textDecoration: 'none', transition: 'all .15s',
+                    }}
+                    onMouseEnter={e => {
+                      if (pathname !== item.href) {
+                        (e.currentTarget as HTMLElement).style.color = '#94A3B8'
+                        ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      if (pathname !== item.href) {
+                        (e.currentTarget as HTMLElement).style.color = '#64748B'
+                        ;(e.currentTarget as HTMLElement).style.background = 'transparent'
+                      }
+                    }}
+                  >
+                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'currentColor', flexShrink: 0 }}/>
+                    {item.label}
+                  </a>
+
+                  {/* Child links */}
+                  {item.children!
+                    .filter(c => c.roles.includes(userRole as UserRole))
+                    .map(child => {
+                      const childActive = pathname.startsWith(child.href)
+                      return (
+                        <a
+                          key={child.href}
+                          href={child.href}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '8px',
+                            padding: '6px 10px 6px 36px', borderRadius: '6px',
+                            fontSize: '12px',
+                            color: childActive ? '#F1F5F9' : '#64748B',
+                            background: childActive ? 'rgba(255,255,255,0.06)' : 'transparent',
+                            textDecoration: 'none', transition: 'all .15s',
+                          }}
+                          onMouseEnter={e => {
+                            if (!childActive) {
+                              (e.currentTarget as HTMLElement).style.color = '#94A3B8'
+                              ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'
+                            }
+                          }}
+                          onMouseLeave={e => {
+                            if (!childActive) {
+                              (e.currentTarget as HTMLElement).style.color = '#64748B'
+                              ;(e.currentTarget as HTMLElement).style.background = 'transparent'
+                            }
+                          }}
+                        >
+                          <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'currentColor', flexShrink: 0 }}/>
+                          {child.label}
+                        </a>
+                      )
+                    })}
+                </div>
+              )}
+            </div>
           )
         })}
       </nav>
