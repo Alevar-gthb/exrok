@@ -1,0 +1,47 @@
+import { z } from 'zod'
+
+const MAX_BYTES = 1 * 1024 * 1024
+const ACCEPTED = ['image/jpeg', 'image/png', 'application/pdf']
+const dec = (label: string) => z.string().min(1, `${label} wajib diisi`)
+  .refine(v => !isNaN(Number(v)) && Number(v) >= 0, { message: `${label} harus angka positif` })
+const optDec = z.string()
+  .refine(v => v === '' || (!isNaN(Number(v)) && Number(v) >= 0), { message: 'Harus angka positif' })
+  .default('0')
+
+export const expenseSchema = z.object({
+  transaction_date: z.string().min(1, 'Tanggal wajib diisi').regex(/^\d{4}-\d{2}-\d{2}$/, 'Format salah'),
+  type: z.enum(['PO', 'Reimburse', 'Salary'], { required_error: 'Tipe wajib dipilih' }),
+  description: z.string().min(3, 'Min 3 karakter').max(500, 'Max 500 karakter'),
+  project_id: z.string().optional().or(z.literal('')),
+  employee_id: z.string().optional().or(z.literal('')),
+  // Breakdown biaya
+  amount: dec('DPP (Amount)'),
+  vat: optDec,
+  admin_fee: optDec,
+  service_fee: optDec,
+  // Field baru dari Excel
+  category_id: z.string().optional().or(z.literal('')),
+  subcategory_id: z.string().optional().or(z.literal('')),
+  vendor_id: z.string().optional().or(z.literal('')),
+  business_unit: z.enum(['RKT', 'SPH']).optional().or(z.literal('')),
+  department: z.enum(['Technology', 'Operation', 'Sales', 'Human Capital']).optional().or(z.literal('')),
+  payment_method: z.string().optional().or(z.literal('')),
+  due_date: z.string().optional().or(z.literal('')),
+  // Dokumen
+  document: z.custom<File>().optional().nullable()
+    .refine(f => !f || f.size <= MAX_BYTES, 'Maks 1MB')
+    .refine(f => !f || ACCEPTED.includes(f.type), 'Format harus JPG, PNG, atau PDF'),
+})
+
+export type ExpenseFormValues = z.infer<typeof expenseSchema>
+
+export const expenseDefaultValues: Partial<ExpenseFormValues> = {
+  transaction_date: new Date().toISOString().split('T')[0],
+  type: 'PO', description: '', project_id: '', employee_id: '',
+  amount: '', vat: '0', admin_fee: '0', service_fee: '0',
+  category_id: '', subcategory_id: '', vendor_id: '',
+  business_unit: '', department: '', payment_method: '', due_date: '',
+  document: null,
+}
+
+export const PAYMENT_METHODS = ['Petty Cash', 'BCA', 'UOB Credit Card', 'Panin Credit Card', 'Paper Pioneer Card', 'Payroll Transfer']
