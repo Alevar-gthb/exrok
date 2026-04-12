@@ -35,7 +35,7 @@ export default function LoginPage() {
       return
     }
 
-    router.replace('/expenses')
+    router.replace('/dashboard')
   }
 
   async function handleForgot(e: React.FormEvent) {

@@ -5,7 +5,7 @@
 // Sidebar navigasi Exrok — client component (hover states, logout, submenu)
 // ============================================================
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/supabase/client'
 import type { UserRole } from '@/types/database.types'
@@ -17,6 +17,7 @@ interface SubItem {
 }
 
 interface NavItem {
+  id: string
   href: string
   label: string
   icon: React.ReactNode
@@ -26,7 +27,8 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   {
-    href: '/expenses',
+    id: 'dashboard',
+    href: '/dashboard',
     label: 'Dashboard',
     roles: ['owner', 'finance', 'ga', 'staff'],
     icon: (
@@ -39,6 +41,7 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    id: 'expense',
     href: '/expenses',
     label: 'Expense',
     roles: ['owner', 'finance', 'ga', 'staff'],
@@ -50,10 +53,12 @@ const NAV: NavItem[] = [
       </svg>
     ),
     children: [
-      { href: '/categories', label: 'Expense Categories', roles: ['owner', 'finance', 'ga'] },
+      { href: '/expenses', label: 'Expense List', roles: ['owner', 'finance', 'ga'] },
+      { href: '/expenses/categories', label: 'Expense Categories', roles: ['owner', 'finance', 'ga'] },
     ],
   },
   {
+    id: 'inventory',
     href: '/inventory',
     label: 'Inventaris',
     roles: ['owner', 'finance', 'ga'],
@@ -65,6 +70,7 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    id: 'employees',
     href: '/employees',
     label: 'Karyawan',
     roles: ['owner', 'finance'],
@@ -76,18 +82,19 @@ const NAV: NavItem[] = [
     ),
   },
   {
-    href: '/vendors',
-    label: 'Vendor',
-    roles: ['owner', 'finance', 'ga'],
+    id: 'payroll',
+    href: '/payroll',
+    label: 'Payroll',
+    roles: ['owner', 'finance'],
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M2 13V6l6-4 6 4v7" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-        <rect x="5" y="8" width="3" height="5" rx="1" stroke="currentColor" strokeWidth="1.5"/>
-        <rect x="9" y="8" width="2" height="3" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+        <path d="M3 3h10v10H3V3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+        <path d="M6 6h4M6 9h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
       </svg>
     ),
   },
   {
+    id: 'reports',
     href: '/reports',
     label: 'Laporan',
     roles: ['owner', 'finance'],
@@ -99,9 +106,10 @@ const NAV: NavItem[] = [
     ),
   },
   {
-    href: '/settings/projects',
+    id: 'settings',
+    href: '/settings/vendors',
     label: 'Pengaturan',
-    roles: ['owner'],
+    roles: ['owner', 'finance', 'ga'],
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
@@ -109,7 +117,11 @@ const NAV: NavItem[] = [
       </svg>
     ),
     children: [
-      { href: '/settings/projects', label: 'Master Data', roles: ['owner'] },
+      { href: '/settings/vendors', label: 'Vendor', roles: ['owner', 'finance', 'ga'] },
+      { href: '/settings/projects', label: 'Project List', roles: ['owner'] },
+      { href: '/settings/salary-components', label: 'Komponen gaji', roles: ['owner', 'finance'] },
+      { href: '/settings/approval-rules', label: 'Approval Rules', roles: ['owner', 'finance', 'ga', 'staff'] },
+      { href: '/settings/users', label: 'User', roles: ['owner'] },
     ],
   },
 ]
@@ -117,20 +129,42 @@ const NAV: NavItem[] = [
 interface SidebarClientProps {
   userName: string
   userRole: string
+  employeeId: string
 }
 
-export function SidebarClient({ userName, userRole }: SidebarClientProps) {
+export function SidebarClient({ userName, userRole, employeeId }: SidebarClientProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+
+  const [approvalBadge, setApprovalBadge] = useState<number | null>(null)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+
+  const fetchApprovalCount = useCallback(async () => {
+    const { count } = await supabase
+      .from('expense_approvals')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'Pending')
+      .eq('approver_employee_id', employeeId)
+    setApprovalBadge(count ?? 0)
+  }, [supabase, employeeId])
+
+  useEffect(() => {
+    void fetchApprovalCount()
+    const t = setInterval(() => void fetchApprovalCount(), 60_000)
+    return () => clearInterval(t)
+  }, [fetchApprovalCount])
 
   // Track which parent menus are open
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {}
     NAV.forEach(item => {
-      if (item.children) {
-        const childActive = item.children.some(c => pathname.startsWith(c.href))
-        if (childActive) initial[item.href + item.label] = true
+      const visibleChildren = (item.children ?? []).filter(c =>
+        c.roles.includes(userRole as UserRole)
+      )
+      if (visibleChildren.length > 0) {
+        const childActive = visibleChildren.some(c => pathname.startsWith(c.href))
+        if (childActive) initial[item.id] = true
       }
     })
     return initial
@@ -152,9 +186,22 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
     ga: 'General Affairs', staff: 'Staff',
   }
 
-  async function handleLogout() {
-    await supabase.auth.signOut()
-    router.replace('/login')
+  function handleLogout() {
+    if (isLoggingOut) return
+    setIsLoggingOut(true)
+
+    // Biar cookie sesi terhapus dengan benar, lakukan logout lewat route server.
+    // (Kalau kita hanya signOut dari client, kadang middleware masih sempat membaca session lama.)
+    try {
+      window.location.href = '/api/logout'
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[logout] navigation failed:', e)
+      void supabase.auth.signOut().finally(() => {
+        router.replace('/login')
+        setIsLoggingOut(false)
+      })
+    }
   }
 
   function toggleMenu(key: string) {
@@ -207,20 +254,25 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
         </div>
 
         {visibleNav.map(item => {
-          const key = item.href + item.label
-          const hasChildren = item.children && item.children.length > 0
-          const isOpen = openMenus[key] ?? false
+          const visibleChildren = (item.children ?? []).filter(c =>
+            c.roles.includes(userRole as UserRole)
+          )
+          const hasChildren = visibleChildren.length > 0
+          const isOpen = openMenus[item.id] ?? false
           const active = !hasChildren && pathname === item.href
           const parentActive = hasChildren
-            ? (item.children!.some(c => pathname.startsWith(c.href)) || pathname === item.href)
+            ? (visibleChildren.some(c => pathname.startsWith(c.href)) || pathname === item.href)
             : false
 
           return (
-            <div key={key}>
+            <div key={item.id}>
               {/* Parent item */}
               {hasChildren ? (
                 <button
-                  onClick={() => toggleMenu(key)}
+                  type="button"
+                  onClick={() => {
+                    toggleMenu(item.id)
+                  }}
                   style={{
                     ...navItemStyle(parentActive),
                     justifyContent: 'space-between',
@@ -268,44 +320,37 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
                   }}
                 >
                   <span style={{ opacity: active ? 1 : 0.7 }}>{item.icon}</span>
-                  {item.label}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                    {item.label}
+                    {item.id === 'dashboard' && approvalBadge != null && approvalBadge > 0 && (
+                      <span
+                        style={{
+                          marginLeft: 'auto',
+                          minWidth: '18px',
+                          height: '18px',
+                          padding: '0 5px',
+                          borderRadius: '9px',
+                          background: '#B45309',
+                          color: '#FFFBEB',
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {approvalBadge > 99 ? '99+' : approvalBadge}
+                      </span>
+                    )}
+                  </span>
                 </a>
               )}
 
               {/* Submenu */}
               {hasChildren && isOpen && (
                 <div style={{ marginBottom: '4px' }}>
-                  {/* Parent link first */}
-                  <a
-                    href={item.href}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '8px',
-                      padding: '6px 10px 6px 36px', borderRadius: '6px',
-                      fontSize: '12px', color: pathname === item.href ? '#F1F5F9' : '#64748B',
-                      background: pathname === item.href ? 'rgba(255,255,255,0.06)' : 'transparent',
-                      textDecoration: 'none', transition: 'all .15s',
-                    }}
-                    onMouseEnter={e => {
-                      if (pathname !== item.href) {
-                        (e.currentTarget as HTMLElement).style.color = '#94A3B8'
-                        ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      if (pathname !== item.href) {
-                        (e.currentTarget as HTMLElement).style.color = '#64748B'
-                        ;(e.currentTarget as HTMLElement).style.background = 'transparent'
-                      }
-                    }}
-                  >
-                    <span style={{ width: '4px', height: '4px', borderRadius: '50%', background: 'currentColor', flexShrink: 0 }}/>
-                    {item.label}
-                  </a>
-
                   {/* Child links */}
-                  {item.children!
-                    .filter(c => c.roles.includes(userRole as UserRole))
-                    .map(child => {
+                  {visibleChildren.map(child => {
                       const childActive = pathname.startsWith(child.href)
                       return (
                         <a
@@ -365,12 +410,15 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
           </div>
         </div>
         <button
+          type="button"
           onClick={handleLogout}
+          disabled={isLoggingOut}
           style={{
             width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
             padding: '7px 10px', borderRadius: '8px', fontSize: '12px',
             color: '#64748B', background: 'none', border: 'none',
-            cursor: 'pointer', transition: 'all .15s', textAlign: 'left',
+            cursor: isLoggingOut ? 'not-allowed' : 'pointer', transition: 'all .15s', textAlign: 'left',
+            opacity: isLoggingOut ? 0.7 : 1,
           }}
           onMouseEnter={e => {
             (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'
@@ -384,7 +432,7 @@ export function SidebarClient({ userName, userRole }: SidebarClientProps) {
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M6 8h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
-          Keluar
+          {isLoggingOut ? 'Keluar...' : 'Keluar'}
         </button>
       </div>
     </aside>

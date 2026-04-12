@@ -2,15 +2,14 @@
 
 // ============================================================
 // src/components/expense-table.tsx
-// Tabel expense dengan filter, status badge, approval action
+// Tabel expense dengan filter, status badge, submit draft
 // ============================================================
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatIDR } from '@/lib/decimal'
-import { updateExpenseStatus } from '@/lib/actions/expense.actions'
-
-type StatusType = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected'
+import { EXPENSE_STATUS_STYLE } from '@/lib/expense-status-styles'
+import { rpcSubmitExpense } from '@/lib/actions/approval.actions'
 
 interface ExpenseRow {
   id: string
@@ -26,6 +25,7 @@ interface ExpenseRow {
   status: string
   is_reconciled: boolean
   created_at: string
+  created_by: string | null
   project: { id: string; name: string } | null
   employee: { id: string; full_name: string } | null
 }
@@ -33,15 +33,7 @@ interface ExpenseRow {
 interface ExpenseTableProps {
   expenses: ExpenseRow[]
   projects: { id: string; name: string }[]
-  userRole: string
   userId: string
-}
-
-const STATUS_STYLE: Record<string, { bg: string; color: string; border: string; label: string }> = {
-  'Draft':            { bg: '#F8FAFC', color: '#475569', border: '#E2E8F0', label: 'Draft' },
-  'Pending Approval': { bg: '#FFFBEB', color: '#92400E', border: '#FCD34D', label: 'Menunggu' },
-  'Approved':         { bg: '#F0FDF4', color: '#166534', border: '#86EFAC', label: 'Disetujui' },
-  'Rejected':         { bg: '#FEF2F2', color: '#991B1B', border: '#FECACA', label: 'Ditolak' },
 }
 
 const TYPE_STYLE: Record<string, { bg: string; color: string }> = {
@@ -51,7 +43,7 @@ const TYPE_STYLE: Record<string, { bg: string; color: string }> = {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const s = STATUS_STYLE[status] ?? STATUS_STYLE['Draft']
+  const s = EXPENSE_STATUS_STYLE[status] ?? EXPENSE_STATUS_STYLE['Draft']
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', padding: '2px 8px',
@@ -76,7 +68,7 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
-export function ExpenseTable({ expenses, projects, userRole, userId }: ExpenseTableProps) {
+export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -88,8 +80,6 @@ export function ExpenseTable({ expenses, projects, userRole, userId }: ExpenseTa
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const canApprove = ['owner', 'finance'].includes(userRole)
-
   // Filter client-side
   const filtered = expenses.filter(e => {
     if (filterStatus && e.status !== filterStatus) return false
@@ -99,16 +89,13 @@ export function ExpenseTable({ expenses, projects, userRole, userId }: ExpenseTa
     return true
   })
 
-  async function handleApproval(id: string, newStatus: StatusType) {
+  async function handleSubmitExpense(id: string) {
     setActionLoading(id)
     setActionError(null)
-    const result = await updateExpenseStatus(id, newStatus)
+    const result = await rpcSubmitExpense(id)
     setActionLoading(null)
-    if (!result.success) {
-      setActionError(result.error ?? 'Gagal update status')
-    } else {
-      startTransition(() => router.refresh())
-    }
+    if (!result.success) setActionError(result.error ?? 'Gagal submit')
+    else startTransition(() => router.refresh())
   }
 
   const inputStyle = {
@@ -127,9 +114,11 @@ export function ExpenseTable({ expenses, projects, userRole, userId }: ExpenseTa
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inputStyle}>
           <option value="">Semua status</option>
           <option value="Draft">Draft</option>
+          <option value="Submitted">Submitted</option>
           <option value="Pending Approval">Menunggu</option>
           <option value="Approved">Disetujui</option>
           <option value="Rejected">Ditolak</option>
+          <option value="Paid">Dibayar</option>
         </select>
 
         <select value={filterProject} onChange={e => setFilterProject(e.target.value)} style={inputStyle}>
@@ -187,10 +176,17 @@ export function ExpenseTable({ expenses, projects, userRole, userId }: ExpenseTa
                 {filtered.map((row, i) => (
                   <tr
                     key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') router.push(`/expenses/${row.id}`)
+                    }}
+                    onClick={() => router.push(`/expenses/${row.id}`)}
                     style={{
                       borderBottom: i < filtered.length - 1 ? '1px solid #F1F5F9' : 'none',
                       background: actionLoading === row.id ? '#FAFAFA' : '#fff',
                       transition: 'background .1s',
+                      cursor: 'pointer',
                     }}
                     onMouseEnter={e => { if (actionLoading !== row.id) (e.currentTarget as HTMLElement).style.background = '#FAFAFA' }}
                     onMouseLeave={e => { if (actionLoading !== row.id) (e.currentTarget as HTMLElement).style.background = '#fff' }}
@@ -248,47 +244,31 @@ export function ExpenseTable({ expenses, projects, userRole, userId }: ExpenseTa
                     </td>
 
                     {/* Aksi */}
-                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        {/* Approve — hanya owner/finance, expense status Pending */}
-                        {canApprove && row.status === 'Pending Approval' && (
-                          <>
-                            <button
-                              onClick={() => handleApproval(row.id, 'Approved')}
-                              disabled={!!actionLoading}
-                              style={{
-                                padding: '4px 10px', fontSize: '11px', fontWeight: '500',
-                                background: '#F0FDF4', color: '#166534', border: '1px solid #86EFAC',
-                                borderRadius: '6px', cursor: 'pointer',
-                              }}
-                            >
-                              Setujui
-                            </button>
-                            <button
-                              onClick={() => handleApproval(row.id, 'Rejected')}
-                              disabled={!!actionLoading}
-                              style={{
-                                padding: '4px 10px', fontSize: '11px', fontWeight: '500',
-                                background: '#FEF2F2', color: '#991B1B', border: '1px solid #FECACA',
-                                borderRadius: '6px', cursor: 'pointer',
-                              }}
-                            >
-                              Tolak
-                            </button>
-                          </>
+                        {row.status === 'Draft' && row.created_by === userId && (
+                          <button
+                            type="button"
+                            onClick={() => void handleSubmitExpense(row.id)}
+                            disabled={!!actionLoading}
+                            style={{
+                              padding: '4px 10px', fontSize: '11px', fontWeight: '500',
+                              background: '#0F172A', color: '#fff', border: 'none',
+                              borderRadius: '6px', cursor: 'pointer',
+                            }}
+                          >
+                            Submit
+                          </button>
                         )}
-
-                        {/* Lihat detail */}
-                        <a
-                          href={`/expenses/${row.id}`}
+                        <span
                           style={{
                             padding: '4px 10px', fontSize: '11px', color: '#475569',
                             border: '1px solid #E2E8F0', borderRadius: '6px',
-                            textDecoration: 'none', display: 'inline-block',
+                            display: 'inline-block',
                           }}
                         >
                           Detail
-                        </a>
+                        </span>
                       </div>
                     </td>
                   </tr>

@@ -8,13 +8,21 @@ import {
   expenseSchema, expenseDefaultValues, PAYMENT_METHODS,
   type ExpenseFormValues,
 } from '@/lib/validations/expense.schema'
-import { insertExpense, uploadExpenseDocument } from '@/lib/actions/expense.actions'
+import { insertExpense, updateExpense, uploadExpenseDocument } from '@/lib/actions/expense.actions'
 import { compressFile, formatBytes } from '@/lib/compress-file'
 import { calculateTotalPayment, formatIDR, calculateVAT } from '@/lib/decimal'
-import type { Project, Employee } from '@/types/database.types'
+import type { Project, ExpenseFormEmployee } from '@/types/database.types'
 import { createClient } from '@/supabase/client'
 
-interface ExpenseFormProps { projects: Project[]; employees: Employee[] }
+interface ExpenseFormProps {
+  projects: Project[]
+  employees: ExpenseFormEmployee[]
+  /** Mode edit: isi expense yang sudah ada (Draft / Rejected) */
+  mode?: 'create' | 'edit'
+  expenseId?: string
+  initialValues?: Partial<ExpenseFormValues>
+  existingDocumentUrl?: string | null
+}
 interface FilePreview {
   name: string; type: string; originalSize: number; compressedSize?: number
   wasCompressed?: boolean; previewUrl?: string; compressedFile?: File
@@ -133,7 +141,14 @@ function TotalBreakdown({ amount, vat, adminFee, serviceFee }: { amount: string;
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────
-export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
+export function ExpenseForm({
+  projects,
+  employees,
+  mode = 'create',
+  expenseId,
+  initialValues,
+  existingDocumentUrl,
+}: ExpenseFormProps) {
   const router = useRouter()
   const supabase = createClient()
   const [filePreview, setFilePreview] = useState<FilePreview | null>(null)
@@ -143,8 +158,10 @@ export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
   const [subcategories, setSubcategories] = useState<Subcategory[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
 
+  const mergedDefaults = { ...expenseDefaultValues, ...initialValues } as Partial<ExpenseFormValues>
+
   const { register, handleSubmit, watch, setValue, formState: { errors }, reset, clearErrors, setError } = useForm<ExpenseFormValues>({
-    resolver: zodResolver(expenseSchema), defaultValues: expenseDefaultValues, mode: 'onChange',
+    resolver: zodResolver(expenseSchema), defaultValues: mergedDefaults as ExpenseFormValues, mode: 'onChange',
   })
 
   const [amount, vat, adminFee, serviceFee, expenseType, categoryId] = watch(['amount', 'vat', 'admin_fee', 'service_fee', 'type', 'category_id'])
@@ -190,7 +207,7 @@ export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
         if (!up.success) { setError('document', { message: up.error }); setIsSubmitting(false); return }
         documentUrl = up.data?.url
       }
-      const result = await insertExpense({
+      const basePayload = {
         transaction_date: values.transaction_date, type: values.type, description: values.description,
         project_id: values.project_id || null, employee_id: values.employee_id || null,
         amount: values.amount, vat: values.vat || '0', admin_fee: values.admin_fee || '0', service_fee: values.service_fee || '0',
@@ -199,13 +216,28 @@ export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
         business_unit: (values.business_unit as 'RKT' | 'SPH') || null,
         department: values.department || null, payment_method: values.payment_method || null,
         due_date: values.due_date || null,
-        status: 'Pending Approval', document_url: documentUrl ?? null, is_reconciled: false, ref_no: null,
-      })
-      if (result.success) {
-        setSubmitResult({ type: 'success', message: `Expense berhasil diajukan${result.data?.ref_no ? ` · ${result.data.ref_no}` : ''}` })
-        reset(expenseDefaultValues); setFilePreview(null)
-        setTimeout(() => router.push('/expenses'), 1500)
-      } else { setSubmitResult({ type: 'error', message: result.error ?? 'Terjadi kesalahan' }) }
+        payment_date: null,
+        document_url: documentUrl ?? existingDocumentUrl ?? null, is_reconciled: false,
+      }
+      if (mode === 'edit' && expenseId) {
+        const result = await updateExpense(expenseId, basePayload)
+        if (result.success) {
+          setSubmitResult({ type: 'success', message: 'Perubahan disimpan' })
+          setTimeout(() => router.push(`/expenses/${expenseId}`), 1200)
+        } else { setSubmitResult({ type: 'error', message: result.error ?? 'Terjadi kesalahan' }) }
+      } else {
+        const result = await insertExpense({
+          ...basePayload,
+          ref_no: null,
+          status: 'Draft',
+          reimbursement_batch_id: null,
+        })
+        if (result.success) {
+          setSubmitResult({ type: 'success', message: `Expense berhasil diajukan${result.data?.ref_no ? ` · ${result.data.ref_no}` : ''}` })
+          reset(expenseDefaultValues); setFilePreview(null)
+          setTimeout(() => router.push('/expenses'), 1500)
+        } else { setSubmitResult({ type: 'error', message: result.error ?? 'Terjadi kesalahan' }) }
+      }
     } catch (e) {
       setSubmitResult({ type: 'error', message: e instanceof Error ? e.message : 'Terjadi kesalahan tak terduga' })
     } finally { setIsSubmitting(false) }
@@ -223,8 +255,12 @@ export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="2" stroke="white" strokeWidth="1.5"/><path d="M1 6h14M5 10h3" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </div>
           <div>
-            <h1 style={{ fontSize: '15px', fontWeight: '600', color: '#0F172A', margin: 0 }}>Pengajuan Pengeluaran</h1>
-            <p style={{ fontSize: '12px', color: '#64748B', margin: 0 }}>Isi form untuk mengajukan expense baru</p>
+            <h1 style={{ fontSize: '15px', fontWeight: '600', color: '#0F172A', margin: 0 }}>
+              {mode === 'edit' ? 'Edit expense' : 'Pengajuan Pengeluaran'}
+            </h1>
+            <p style={{ fontSize: '12px', color: '#64748B', margin: 0 }}>
+              {mode === 'edit' ? 'Perbarui data lalu submit ulang dari halaman detail' : 'Isi form untuk mengajukan expense baru'}
+            </p>
           </div>
         </div>
       </div>
@@ -271,7 +307,11 @@ export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
               <Field label="Karyawan" error={errors.employee_id?.message}>
                 <select {...register('employee_id')} style={inp} onFocus={fo} onBlur={fb}>
                   <option value="">Pilih karyawan...</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.full_name}</option>)}
+                  {employees.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {[e.nip, e.full_name].filter(Boolean).join(' · ')}
+                    </option>
+                  ))}
                 </select>
               </Field>
             </div>
@@ -358,7 +398,7 @@ export function ExpenseForm({ projects, employees }: ExpenseFormProps) {
                 style={{ padding: '8px 16px', fontSize: '13px', background: '#fff', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', color: '#475569' }}>Reset</button>
               <button type="submit" disabled={isSubmitting || !!filePreview?.isCompressing}
                 style={{ padding: '8px 24px', fontSize: '13px', fontWeight: '500', minWidth: '130px', background: isSubmitting ? '#94A3B8' : '#0F172A', color: '#fff', border: 'none', borderRadius: '8px', cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
-                {isSubmitting ? 'Menyimpan...' : 'Ajukan Expense'}
+                {isSubmitting ? 'Menyimpan...' : mode === 'edit' ? 'Simpan perubahan' : 'Ajukan Expense'}
               </button>
             </div>
           </div>

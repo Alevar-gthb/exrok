@@ -10,7 +10,13 @@ export type UserRole = 'owner' | 'finance' | 'ga' | 'staff'
 export type EmployeeStatus = 'Active' | 'Inactive'
 export type ProjectStatus = 'Active' | 'Completed' | 'On Hold'
 export type ExpenseType = 'PO' | 'Reimburse' | 'Salary'
-export type ExpenseStatus = 'Draft' | 'Pending Approval' | 'Approved' | 'Rejected'
+export type ExpenseStatus =
+  | 'Draft'
+  | 'Submitted'
+  | 'Pending Approval'
+  | 'Approved'
+  | 'Rejected'
+  | 'Paid'
 export type InventoryType = 'Asset' | 'Consumable'
 export type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE'
 
@@ -23,11 +29,20 @@ export interface Employee {
   salary_amount: string       // NUMERIC(15,2) → string untuk presisi
   role: UserRole
   status: EmployeeStatus
+  /** Nomor induk pekerja internal (diisi otomatis oleh DB jika kosong). */
+  nip: string | null
+  /** Jabatan / posisi pekerjaan. */
+  job_title: string | null
+  /** Jika true, modul kontrak/perpanjangan tidak diperlukan (karyawan tetap). */
+  is_permanent: boolean
   created_at: string          // TIMESTAMPTZ → ISO string
 }
 
 export type EmployeeInsert = Omit<Employee, 'id' | 'created_at'>
 export type EmployeeUpdate = Partial<EmployeeInsert>
+
+/** Dropdown expense — tanpa gaji pokok (HR mengatur komponen di menu Karyawan). */
+export type ExpenseFormEmployee = Pick<Employee, 'id' | 'full_name' | 'email' | 'role' | 'status' | 'created_at' | 'nip' | 'job_title'>
 
 // ─────────────────────────────────────────────────────────────
 
@@ -58,6 +73,15 @@ export interface Expense {
   status: ExpenseStatus
   project_id: string | null   // FK → projects.id
   employee_id: string | null  // FK → employees.id
+  category_id: string | null
+  subcategory_id: string | null
+  vendor_id: string | null
+  business_unit: 'RKT' | 'SPH' | null
+  department: 'Technology' | 'Operation' | 'Sales' | 'Human Capital' | null
+  payment_method: string | null
+  due_date: string | null
+  payment_date: string | null
+  reimbursement_batch_id: string | null
   document_url: string | null
   is_reconciled: boolean
   created_by: string | null   // UUID → auth.users.id
@@ -73,6 +97,167 @@ export interface ExpenseWithRelations extends Expense {
   project: Pick<Project, 'id' | 'name'> | null
   employee: Pick<Employee, 'id' | 'full_name'> | null
 }
+
+// ─── APPROVAL ────────────────────────────────────────────────
+
+export interface ApprovalRule {
+  id: string
+  name: string
+  business_unit: 'RKT' | 'SPH' | null
+  expense_type: ExpenseType | null
+  min_amount: string
+  max_amount: string | null
+  require_approval: boolean
+  approver_employee_id: string | null
+  priority: number
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+}
+
+export type ApprovalRuleInsert = Omit<ApprovalRule, 'id' | 'created_at'>
+export type ApprovalRuleUpdate = Partial<ApprovalRuleInsert>
+
+export type ExpenseApprovalStatus = 'Pending' | 'Approved' | 'Rejected'
+
+export interface ExpenseApproval {
+  id: string
+  expense_id: string
+  approval_rule_id: string | null
+  approver_employee_id: string | null
+  status: ExpenseApprovalStatus
+  notes: string | null
+  approved_at: string | null
+  created_at: string
+}
+
+export type ExpenseApprovalInsert = Omit<ExpenseApproval, 'id' | 'created_at'>
+export type ExpenseApprovalUpdate = Partial<ExpenseApprovalInsert>
+
+// ─── REIMBURSEMENT BATCHES ───────────────────────────────────
+
+export interface ReimbursementBatch {
+  id: string
+  batch_no: string
+  batch_date: string
+  payment_method: string | null
+  reference_no: string | null
+  notes: string | null
+  total_amount: string
+  created_by: string | null
+  created_at: string
+}
+
+export type ReimbursementBatchInsert = Omit<ReimbursementBatch, 'id' | 'created_at'>
+
+export interface ReimbursementBatchItem {
+  id: string
+  batch_id: string
+  expense_id: string
+  amount_paid: string
+  created_at: string
+}
+
+export type ReimbursementBatchItemInsert = Omit<ReimbursementBatchItem, 'id' | 'created_at'>
+
+// ─── HR & PAYROLL ────────────────────────────────────────────
+
+export interface EmployeeContract {
+  id: string
+  employee_id: string
+  start_date: string
+  end_date: string
+  replaces_contract_id: string | null
+  notes: string | null
+  created_at: string
+}
+
+export type EmployeeContractInsert = Omit<EmployeeContract, 'id' | 'created_at'>
+export type EmployeeContractUpdate = Partial<EmployeeContractInsert>
+
+export type CompensationKind = 'earning' | 'deduction'
+
+/** Master komponen gaji (dipilih per karyawan + nominal). */
+export interface SalaryComponentTemplate {
+  id: string
+  code: string
+  label: string
+  kind: CompensationKind
+  is_active: boolean
+  created_at: string
+}
+
+export type SalaryComponentTemplateInsert = Omit<SalaryComponentTemplate, 'id' | 'created_at'>
+export type SalaryComponentTemplateUpdate = Partial<SalaryComponentTemplateInsert>
+
+/** Nominal komponen per karyawan (referensi ke master). */
+export interface EmployeeSalaryComponentAmount {
+  id: string
+  employee_id: string
+  template_id: string
+  amount: string
+  created_at: string
+}
+
+export type EmployeeSalaryComponentAmountInsert = Omit<EmployeeSalaryComponentAmount, 'id' | 'created_at'>
+export type EmployeeSalaryComponentAmountUpdate = Partial<
+  Pick<EmployeeSalaryComponentAmount, 'amount' | 'template_id'>
+>
+
+export interface EmployeeProjectAssignment {
+  id: string
+  employee_id: string
+  project_id: string
+  is_primary: boolean
+  started_on: string
+  ended_on: string | null
+  created_at: string
+}
+
+export type EmployeeProjectAssignmentInsert = Omit<EmployeeProjectAssignment, 'id' | 'created_at'>
+export type EmployeeProjectAssignmentUpdate = Partial<EmployeeProjectAssignmentInsert>
+
+export type PayrollRunStatus = 'draft' | 'submitted'
+
+export interface PayrollRun {
+  id: string
+  period_year: number
+  period_month: number
+  status: PayrollRunStatus
+  created_by: string | null
+  created_at: string
+}
+
+export type PayrollRunInsert = Omit<PayrollRun, 'id' | 'created_at'>
+export type PayrollRunUpdate = Partial<Pick<PayrollRun, 'status'>>
+
+export type PayrollLineAdjustmentKind = 'earning' | 'deduction'
+
+/** Baris penyesuaian payroll (lembur, bonus, potongan, dll.) */
+export interface PayrollLineAdjustment {
+  code: string
+  label: string
+  kind: PayrollLineAdjustmentKind
+  amount: string
+}
+
+export interface PayrollRunLine {
+  id: string
+  run_id: string
+  employee_id: string
+  project_id: string | null
+  amount: string
+  base_amount: string | null
+  adjustments: PayrollLineAdjustment[]
+  components_snapshot: Record<string, unknown> | null
+  expense_id: string | null
+  created_at: string
+}
+
+export type PayrollRunLineInsert = Omit<PayrollRunLine, 'id' | 'created_at'>
+export type PayrollRunLineUpdate = Partial<
+  Pick<PayrollRunLine, 'project_id' | 'amount' | 'base_amount' | 'adjustments' | 'components_snapshot' | 'expense_id'>
+>
 
 // ─── 3. INVENTORY ────────────────────────────────────────────
 

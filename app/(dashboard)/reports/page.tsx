@@ -1,6 +1,7 @@
 // app/(dashboard)/reports/page.tsx
 import { createClient } from '@/supabase/server'
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { ExportButton } from '@/components/export-button'
 
 export const metadata = { title: 'Laporan | Exrok' }
@@ -47,6 +48,41 @@ export default async function ReportsPage() {
             <p style={{ fontSize: '11px', color: s.color, margin: 0, opacity: 0.7 }}>{s.sub}</p>
           </div>
         ))}
+      </div>
+
+      {/* Reimburse batch report */}
+      <div
+        style={{
+          background: '#F0FDF4',
+          border: '1px solid #86EFAC',
+          borderRadius: '12px',
+          padding: '20px 24px',
+          marginBottom: '20px',
+        }}
+      >
+        <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#166534', margin: '0 0 4px' }}>
+          Laporan reimburse (batch)
+        </h2>
+        <p style={{ fontSize: '13px', color: '#15803D', margin: '0 0 14px' }}>
+          Ringkasan per karyawan, daftar payable, dan proses payout sekaligus.
+        </p>
+        <Link
+          href="/reports/reimburse"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 16px',
+            background: '#166534',
+            color: '#fff',
+            borderRadius: '8px',
+            fontSize: '13px',
+            fontWeight: '500',
+            textDecoration: 'none',
+          }}
+        >
+          Buka laporan reimburse
+        </Link>
       </div>
 
       {/* Export section */}

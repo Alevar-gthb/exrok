@@ -2,6 +2,7 @@
 // app/(dashboard)/expenses/page.tsx
 // Halaman daftar expense — Server Component
 // ============================================================
+import type { ComponentProps } from 'react'
 import { createClient } from '@/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
@@ -19,21 +20,13 @@ export default async function ExpensesPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: employee } = await supabase
-    .from('employees')
-    .select('role')
-    .eq('email', user.email ?? '')
-    .single()
-
-  const role = employee?.role ?? 'staff'
-
   // Build query dengan filter
   let query = supabase
     .from('expenses')
     .select(`
       id, ref_no, transaction_date, type, description,
       amount, vat, admin_fee, service_fee, total_payment,
-      status, is_reconciled, created_at,
+      status, is_reconciled, created_at, created_by,
       project:projects(id, name),
       employee:employees(id, full_name)
     `)
@@ -81,9 +74,8 @@ export default async function ExpensesPage({
       </div>
 
       <ExpenseTable
-        expenses={expenses ?? []}
+        expenses={(expenses ?? []) as unknown as ComponentProps<typeof ExpenseTable>['expenses']}
         projects={projects ?? []}
-        userRole={role}
         userId={user.id}
       />
     </div>

@@ -1,61 +1,49 @@
 // app/api/cron/payroll/route.ts
-// Dipanggil Railway Cron: 0 0 25 * *
-import { createClient } from '@/supabase/server'
+// Dipanggil scheduler (mis. Railway Cron) dengan header x-cron-secret.
+// Membuat draft payroll run untuk bulan berjalan (sama dengan generator UI),
+// tanpa otomatis submit ke expense — admin selesaikan di /payroll.
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { insertPayrollRunForPeriod } from '@/lib/payroll-run-insert'
 
 export async function POST(req: Request) {
-  // Guard: hanya boleh dipanggil dari Railway (cek secret header)
   const secret = req.headers.get('x-cron-secret')
   if (secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const supabase = await createClient()
-
-  // 1. Ambil semua karyawan aktif yang punya salary_amount > 0
-  const { data: employees, error: empErr } = await supabase
-    .from('employees')
-    .select('id, full_name, salary_amount')
-    .eq('status', 'Active')
-    .gt('salary_amount', 0)
-
-  if (empErr || !employees?.length) {
-    return NextResponse.json({ message: 'No active employees', count: 0 })
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !serviceKey) {
+    return NextResponse.json({ error: 'Missing Supabase URL or SUPABASE_SERVICE_ROLE_KEY' }, { status: 500 })
   }
 
-  // 2. Bulan ini
+  const supabase = createClient(url, serviceKey)
   const now = new Date()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const year = now.getFullYear()
-  const transactionDate = `${year}-${month}-25`
+  const periodYear = now.getFullYear()
+  const periodMonth = now.getMonth() + 1
 
-  // 3. Insert expenses type Salary untuk setiap karyawan
-  const rows = employees.map(emp => ({
-    transaction_date: transactionDate,
-    type: 'Salary' as const,
-    description: `Gaji ${emp.full_name} - ${month}/${year}`,
-    amount: emp.salary_amount,
-    vat: '0', admin_fee: '0', service_fee: '0',
-    employee_id: emp.id,
-    status: 'Pending Approval',
-    is_reconciled: false,
-  }))
+  const result = await insertPayrollRunForPeriod(supabase, periodYear, periodMonth, null)
 
-  const { data, error: insErr } = await supabase.from('expenses').insert(rows).select('id')
-
-  if (insErr) {
-    console.error('[cron/payroll]', insErr)
-    return NextResponse.json({ error: insErr.message }, { status: 500 })
+  if (!result.ok) {
+    if (result.error.includes('sudah ada')) {
+      return NextResponse.json({ message: result.error, skipped: true })
+    }
+    console.error('[cron/payroll]', result.error)
+    return NextResponse.json({ error: result.error }, { status: 500 })
   }
 
-  console.log(`[cron/payroll] Generated ${data?.length} salary drafts for ${month}/${year}`)
-  return NextResponse.json({ message: 'Payroll generated', count: data?.length, month: `${month}/${year}` })
+  console.log(`[cron/payroll] Draft payroll run ${result.id} for ${periodMonth}/${periodYear}`)
+  return NextResponse.json({
+    message: 'Payroll draft created',
+    run_id: result.id,
+    period: `${periodMonth}/${periodYear}`,
+  })
 }
 
-// Untuk test manual via GET (hanya development)
 export async function GET() {
   if (process.env.NODE_ENV === 'production') {
     return NextResponse.json({ error: 'Use POST in production' }, { status: 405 })
   }
-  return NextResponse.json({ message: 'Payroll cron ready. Use POST with x-cron-secret header.' })
+  return NextResponse.json({ message: 'Payroll cron ready. POST with x-cron-secret; requires SUPABASE_SERVICE_ROLE_KEY.' })
 }

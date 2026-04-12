@@ -29,7 +29,7 @@ export default async function NewExpensePage() {
       .order('name'),
     supabase
       .from('employees')
-      .select('id, full_name, email, salary_amount, role, status, created_at')
+      .select('id, full_name, email, nip, job_title, role, status, created_at')
       .eq('status', 'Active')
       .order('full_name'),
   ])

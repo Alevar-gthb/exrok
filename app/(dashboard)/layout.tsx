@@ -10,7 +10,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const { data: me } = await supabase
     .from('employees')
-    .select('full_name, role')
+    .select('id, full_name, role')
     .eq('email', user.email ?? '')
     .single()
 
@@ -22,6 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <SidebarClient
         userName={me.full_name ?? user.email ?? 'User'}
         userRole={me.role ?? 'staff'}
+        employeeId={me.id}
       />
 
       {/* Main Content */}

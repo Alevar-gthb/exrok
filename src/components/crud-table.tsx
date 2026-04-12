@@ -8,7 +8,7 @@ import { useState } from 'react'
 export interface CrudField {
   key: string
   label: string
-  type?: 'text' | 'select' | 'textarea'
+  type?: 'text' | 'select' | 'textarea' | 'date'
   options?: string[]
   required?: boolean
   placeholder?: string
@@ -23,6 +23,8 @@ interface CrudTableProps {
   onSave: (values: Record<string, string>) => Promise<{ error?: string }>
   onDelete: (id: string) => Promise<{ error?: string }>
   emptyText?: string
+  /** Default true. Set false untuk menyembunyikan aksi hapus (mis. finance). */
+  showDelete?: boolean
 }
 
 const S = {
@@ -30,7 +32,7 @@ const S = {
   lbl: { display: 'block', fontSize: '12px', fontWeight: '500' as const, color: '#475569', marginBottom: '4px' },
 }
 
-export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, emptyText }: CrudTableProps) {
+export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, emptyText, showDelete = true }: CrudTableProps) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Record<string, any> | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
@@ -79,16 +81,20 @@ export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, 
           <h3 style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A', margin: '0 0 14px' }}>{editing ? 'Edit' : 'Tambah'} {title}</h3>
           <form onSubmit={handleSave}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '12px' }}>
-              {fields.filter(f => !f.readOnly).map(f => (
+              {fields.map(f => (
                 <div key={f.key} style={f.type === 'textarea' ? { gridColumn: '1 / -1' } : {}}>
-                  <label style={S.lbl}>{f.label}{f.required && <span style={{ color: '#EF4444' }}>*</span>}</label>
-                  {f.type === 'select' ? (
+                  <label style={S.lbl}>{f.label}{f.required && !f.readOnly && <span style={{ color: '#EF4444' }}>*</span>}</label>
+                  {f.readOnly ? (
+                    <input type="text" readOnly value={form[f.key] ?? ''} style={{ ...S.inp, background: '#F8FAFC', color: '#64748B' }} />
+                  ) : f.type === 'select' ? (
                     <select value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={S.inp} required={f.required}>
                       <option value="">Pilih...</option>
                       {f.options?.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : f.type === 'textarea' ? (
                     <textarea value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={{ ...S.inp, resize: 'none' }} rows={2} placeholder={f.placeholder} required={f.required} />
+                  ) : f.type === 'date' ? (
+                    <input type="date" value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={S.inp} required={f.required} />
                   ) : (
                     <input type="text" value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={S.inp} placeholder={f.placeholder} required={f.required} />
                   )}
@@ -118,7 +124,7 @@ export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, 
                   {displayCols.map(c => (
                     <th key={c.key} style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#475569', letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{c.label}</th>
                   ))}
-                  <th style={{ padding: '10px 14px', width: '80px' }}></th>
+                  <th style={{ padding: '10px 14px', width: showDelete ? '140px' : '80px' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -132,9 +138,11 @@ export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, 
                     <td style={{ padding: '11px 14px' }}>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <button onClick={() => openEdit(row)} style={{ padding: '3px 10px', fontSize: '11px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: 'pointer', color: '#475569' }}>Edit</button>
-                        <button onClick={() => handleDelete(row.id)} disabled={deleting === row.id} style={{ padding: '3px 10px', fontSize: '11px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', cursor: 'pointer', color: '#991B1B' }}>
-                          {deleting === row.id ? '...' : 'Hapus'}
-                        </button>
+                        {showDelete && (
+                          <button onClick={() => handleDelete(row.id)} disabled={deleting === row.id} style={{ padding: '3px 10px', fontSize: '11px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', cursor: 'pointer', color: '#991B1B' }}>
+                            {deleting === row.id ? '...' : 'Hapus'}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

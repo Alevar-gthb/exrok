@@ -44,7 +44,7 @@ export async function insertExpense(
       vat: payload.vat ?? '0',
       admin_fee: payload.admin_fee ?? '0',
       service_fee: payload.service_fee ?? '0',
-      status: 'Pending Approval',
+      status: 'Draft',
       created_by: user.id,
     })
     .select('id, ref_no')
@@ -108,15 +108,15 @@ export async function uploadExpenseDocument(
 
 export async function updateExpenseStatus(
   id: string,
-  status: 'Approved' | 'Rejected' | 'Draft' | 'Pending Approval'
+  status: 'Approved' | 'Rejected' | 'Draft' | 'Pending Approval' | 'Paid' | 'Submitted'
 ): Promise<ActionResult> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) return { success: false, error: 'Unauthorized' }
 
-  // Hanya owner/finance boleh approve/reject
-  if (['Approved', 'Rejected'].includes(status)) {
+  // Hanya owner/finance boleh approve/reject / tandai paid
+  if (['Approved', 'Rejected', 'Paid'].includes(status)) {
     const { data: emp } = await supabase
       .from('employees')
       .select('role')
@@ -128,10 +128,49 @@ export async function updateExpenseStatus(
     }
   }
 
+  const patch: Record<string, unknown> = { status }
+  if (status === 'Paid') {
+    patch.payment_date = new Date().toISOString().split('T')[0]
+  }
+
   const { error } = await supabase
     .from('expenses')
-    .update({ status })
+    .update(patch)
     .eq('id', id)
+
+  if (error) return { success: false, error: error.message }
+  return { success: true }
+}
+
+export async function updateExpense(
+  id: string,
+  payload: Partial<Omit<ExpenseInsert, 'created_by'>>
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Unauthorized' }
+
+  const { data: row, error: fetchErr } = await supabase
+    .from('expenses')
+    .select('created_by, status')
+    .eq('id', id)
+    .single()
+
+  if (fetchErr || !row) return { success: false, error: 'Expense tidak ditemukan' }
+  if (row.created_by !== user.id) return { success: false, error: 'Akses ditolak' }
+  if (!['Draft', 'Rejected'].includes(row.status)) {
+    return { success: false, error: 'Hanya expense Draft atau Rejected yang bisa diedit' }
+  }
+
+  const patch = {
+    ...payload,
+    vat: payload.vat ?? '0',
+    admin_fee: payload.admin_fee ?? '0',
+    service_fee: payload.service_fee ?? '0',
+    status: 'Draft' as const,
+  }
+
+  const { error } = await supabase.from('expenses').update(patch).eq('id', id)
 
   if (error) return { success: false, error: error.message }
   return { success: true }
