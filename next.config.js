@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Hindari chunk server bernama `@supabase.js` (scope npm `@`) yang bisa
+  // gagal di-resolve saat dev / static-paths-worker — pola umum Next + Supabase.
+  experimental: {
+    serverComponentsExternalPackages: ['@supabase/ssr', '@supabase/supabase-js'],
+  },
   // Izinkan gambar dari Supabase Storage
   images: {
     remotePatterns: [
