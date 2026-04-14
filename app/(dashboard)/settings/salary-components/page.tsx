@@ -18,7 +18,7 @@ export default async function SalaryComponentsSettingsPage() {
 
   const { data: templates } = await supabase
     .from('salary_component_templates')
-    .select('id, code, label, kind, is_active')
+    .select('id, code, label, kind, is_active, include_in_monthly_payroll')
     .order('code')
 
   return (

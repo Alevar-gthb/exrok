@@ -48,7 +48,7 @@ export async function GET(req: Request) {
 
   ws.columns = [
     { header: 'No', key: 'no', width: 5 },
-    { header: 'Tanggal', key: 'transaction_date', width: 14 },
+    { header: 'Tanggal transaksi', key: 'transaction_date', width: 16 },
     { header: 'Ref No', key: 'ref_no', width: 20 },
     { header: 'Business Unit', key: 'business_unit', width: 14 },
     { header: 'Kategori', key: 'category', width: 22 },

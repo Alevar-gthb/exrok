@@ -2,6 +2,7 @@ import { createClient } from '@/supabase/server'
 import { redirect, notFound } from 'next/navigation'
 import { ExpenseForm } from '@/components/expense-form'
 import type { ExpenseFormValues } from '@/lib/validations/expense.schema'
+import type { Expense } from '@/types/database.types'
 
 export const metadata = { title: 'Edit Expense | Exrok' }
 
@@ -20,10 +21,15 @@ export default async function EditExpensePage({ params }: { params: { id: string
     redirect(`/expenses/${params.id}`)
   }
 
-  const [{ data: projects }, { data: employees }] = await Promise.all([
+  const [{ data: projects }, { data: employees }, { data: categories }, { data: subcategories }, { data: vendors }] = await Promise.all([
     supabase.from('projects').select('id, name, client_name, status').eq('status', 'Active').order('name'),
     supabase.from('employees').select('id, full_name, email, nip, job_title, role, status, created_at').eq('status', 'Active').order('full_name'),
+    supabase.from('expense_categories').select('id, name').order('name'),
+    supabase.from('expense_subcategories').select('id, category_id, name').order('name'),
+    supabase.from('vendors').select('id, name').order('name'),
   ])
+
+  const row = expense as Expense
 
   const initialValues: Partial<ExpenseFormValues> = {
     transaction_date: expense.transaction_date,
@@ -42,12 +48,18 @@ export default async function EditExpensePage({ params }: { params: { id: string
     department: (expense.department as ExpenseFormValues['department']) ?? '',
     payment_method: expense.payment_method ?? '',
     due_date: expense.due_date ?? '',
+    has_vat: Number.parseFloat(String(expense.vat ?? '0')) > 0,
+    ocr_scanned: row.ocr_scanned ?? false,
+    ocr_confidence: row.ocr_confidence ?? null,
   }
 
   return (
     <ExpenseForm
       projects={projects ?? []}
       employees={employees ?? []}
+      categories={categories ?? []}
+      subcategories={subcategories ?? []}
+      vendors={vendors ?? []}
       mode="edit"
       expenseId={params.id}
       initialValues={initialValues}

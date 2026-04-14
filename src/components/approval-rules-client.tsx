@@ -10,6 +10,7 @@ import {
   deleteApprovalRule,
   updateApprovalRule,
 } from '@/lib/actions/approval-rules.actions'
+import { PAYMENT_METHODS } from '@/lib/validations/expense.schema'
 
 function formatAmountCondition(r: ApprovalRule): string {
   const min = parseFloat(r.min_amount)
@@ -18,6 +19,15 @@ function formatAmountCondition(r: ApprovalRule): string {
   if (max == null && min > 0) return `> ${formatIDR(String(min))}`
   if (max != null) return `${formatIDR(String(min))} – ${formatIDR(String(max))}`
   return `≥ ${formatIDR(String(min))}`
+}
+
+function formatPaymentCondition(r: ApprovalRule): string {
+  const w = r.payment_methods?.filter(Boolean) ?? []
+  const x = r.excluded_payment_methods?.filter(Boolean) ?? []
+  if (w.length === 0 && x.length === 0) return 'Semua metode'
+  if (w.length && x.length) return `Hanya: ${w.join(', ')} · Kecuali: ${x.join(', ')}`
+  if (w.length) return `Hanya: ${w.join(', ')}`
+  return `Kecuali: ${x.join(', ')}`
 }
 
 interface ApproverOpt {
@@ -56,15 +66,20 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
   const [requireApproval, setRequireApproval] = useState(true)
   const [approverId, setApproverId] = useState('')
   const [priority, setPriority] = useState(0)
+  /** all = tidak filter metode; only = whitelist; except = blacklist */
+  const [pmMode, setPmMode] = useState<'all' | 'only' | 'except'>('all')
+  const [selectedPm, setSelectedPm] = useState<string[]>([])
 
   const [simAmount, setSimAmount] = useState('')
   const [simBu, setSimBu] = useState<'RKT' | 'SPH'>('RKT')
   const [simEt, setSimEt] = useState<'PO' | 'Reimburse' | 'Salary'>('PO')
+  const [simPm, setSimPm] = useState<string>('')
   const simResult = useMemo(() => {
     const n = parseFloat(simAmount.replace(/[^0-9.]/g, ''))
     if (isNaN(n) || n < 0) return null
-    return findMatchingRule(initialRules, n, simBu, simEt)
-  }, [initialRules, simAmount, simBu, simEt])
+    const pm = simPm === '' ? null : simPm
+    return findMatchingRule(initialRules, n, simBu, simEt, pm)
+  }, [initialRules, simAmount, simBu, simEt, simPm])
 
   function openAdd() {
     setEditingId(null)
@@ -76,6 +91,8 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
     setRequireApproval(true)
     setApproverId(approvers[0]?.id ?? '')
     setPriority(initialRules.length ? Math.min(...initialRules.map(r => r.priority)) - 1 : 0)
+    setPmMode('all')
+    setSelectedPm([])
     setModal('add')
   }
 
@@ -89,6 +106,18 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
     setRequireApproval(r.require_approval)
     setApproverId(r.approver_employee_id ?? '')
     setPriority(r.priority)
+    const w = r.payment_methods?.filter(Boolean) ?? []
+    const x = r.excluded_payment_methods?.filter(Boolean) ?? []
+    if (w.length) {
+      setPmMode('only')
+      setSelectedPm([...w])
+    } else if (x.length) {
+      setPmMode('except')
+      setSelectedPm([...x])
+    } else {
+      setPmMode('all')
+      setSelectedPm([])
+    }
     setModal('edit')
   }
 
@@ -108,11 +137,24 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
       setError('Pilih approver jika perlu approval manual')
       return
     }
+    if (pmMode === 'only' && selectedPm.length === 0) {
+      setError('Pilih minimal satu metode pembayaran, atau ubah filter ke "Semua metode" / "Kecuali…"')
+      return
+    }
+    if (pmMode === 'except' && selectedPm.length === 0) {
+      setError('Pilih minimal satu metode yang dikecualikan, atau ubah filter ke "Semua metode"')
+      return
+    }
+
+    const payment_methods = pmMode === 'only' && selectedPm.length ? selectedPm : null
+    const excluded_payment_methods = pmMode === 'except' && selectedPm.length ? selectedPm : null
 
     const payload = {
       name: name.trim(),
       business_unit: bu === 'all' ? null : bu,
       expense_type: et === 'all' ? null : et,
+      payment_methods,
+      excluded_payment_methods,
       min_amount: String(min),
       max_amount: max == null || maxAmount === '' ? null : String(max),
       require_approval: requireApproval,
@@ -173,7 +215,9 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '12px', marginBottom: '20px' }}>
         <div>
           <h1 style={{ fontSize: '18px', fontWeight: '600', color: '#0F172A', margin: '0 0 4px' }}>Approval Rules</h1>
-          <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>Atur siapa yang meng-approve expense berdasarkan jumlah</p>
+          <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>
+            Atur siapa yang meng-approve expense berdasarkan jumlah, tipe, BU, dan metode pembayaran. Prioritas lebih kecil dicek lebih dulu — letakkan rule khusus (mis. Petty Cash auto) di atas rule umum.
+          </p>
         </div>
         <button
           type="button"
@@ -203,7 +247,7 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '720px' }}>
           <thead>
             <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              {['Prioritas', 'Nama', 'Amount', 'Tipe / BU', 'Approver', 'Approval', 'Status', 'Aksi'].map(h => (
+              {['Prioritas', 'Nama', 'Amount', 'Tipe / BU / Metode', 'Approver', 'Approval', 'Status', 'Aksi'].map(h => (
                 <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#475569', textTransform: 'uppercase' }}>
                   {h}
                 </th>
@@ -218,8 +262,9 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
                   <td style={{ padding: '10px 12px' }}>{r.priority}</td>
                   <td style={{ padding: '10px 12px' }}>{r.name}</td>
                   <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>{formatAmountCondition(r)}</td>
-                  <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B' }}>
-                    {r.expense_type ?? 'Semua'} / {r.business_unit ?? 'Semua'}
+                  <td style={{ padding: '10px 12px', fontSize: '12px', color: '#64748B', maxWidth: '220px' }}>
+                    <div>{r.expense_type ?? 'Semua'} / {r.business_unit ?? 'Semua'}</div>
+                    <div style={{ marginTop: '4px', color: '#94A3B8' }}>{formatPaymentCondition(r)}</div>
                   </td>
                   <td style={{ padding: '10px 12px' }}>{ap?.full_name ?? '—'}</td>
                   <td style={{ padding: '10px 12px' }}>
@@ -281,6 +326,15 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
               <option value="Salary">Salary</option>
             </select>
           </div>
+          <div>
+            <label style={{ fontSize: '11px', color: '#64748B' }}>Metode bayar</label>
+            <select value={simPm} onChange={e => setSimPm(e.target.value)} style={{ ...inp, width: '200px', display: 'block', marginTop: '4px' }}>
+              <option value="">(kosong)</option>
+              {PAYMENT_METHODS.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
         </div>
         {simResult ? (
           <p style={{ margin: 0, fontSize: '13px', color: '#0F172A' }}>
@@ -293,7 +347,7 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
             )}
           </p>
         ) : simAmount ? (
-          <p style={{ margin: 0, fontSize: '13px', color: '#64748B' }}>Tidak ada rule yang cocok (akan status Submitted)</p>
+          <p style={{ margin: 0, fontSize: '13px', color: '#64748B' }}>Tidak ada rule yang cocok (akan Menunggu persetujuan / ditangani owner–finance)</p>
         ) : (
           <p style={{ margin: 0, fontSize: '13px', color: '#94A3B8' }}>Isi amount untuk simulasi</p>
         )}
@@ -334,6 +388,57 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
                   <option value="Reimburse">Reimburse</option>
                   <option value="Salary">Salary</option>
                 </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', color: '#475569' }}>Metode pembayaran</label>
+                <select
+                  value={pmMode}
+                  onChange={e => {
+                    const v = e.target.value as 'all' | 'only' | 'except'
+                    setPmMode(v)
+                    if (v === 'all') setSelectedPm([])
+                  }}
+                  style={{ ...inp, marginTop: '4px' }}
+                >
+                  <option value="all">Semua metode</option>
+                  <option value="only">Hanya metode terpilih</option>
+                  <option value="except">Kecuali metode terpilih</option>
+                </select>
+                {pmMode !== 'all' && (
+                  <div
+                    role="group"
+                    aria-label="Pilih metode"
+                    style={{
+                      marginTop: '8px',
+                      padding: '10px',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
+                      maxHeight: '160px',
+                      overflow: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                    }}
+                  >
+                    {PAYMENT_METHODS.map(m => (
+                      <label key={m} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPm.includes(m)}
+                          onChange={() => {
+                            setSelectedPm(prev =>
+                              prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]
+                            )
+                          }}
+                        />
+                        {m}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#94A3B8' }}>
+                  Contoh: auto-approve Petty Cash — pilih &quot;Hanya metode terpilih&quot; lalu centang Petty Cash. Untuk nominal besar tanpa Petty Cash — pilih &quot;Kecuali&quot; dan centang Petty Cash.
+                </p>
               </div>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer' }}>
                 <input type="checkbox" checked={requireApproval} onChange={e => setRequireApproval(e.target.checked)} />

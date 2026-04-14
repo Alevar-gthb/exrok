@@ -157,7 +157,9 @@ export default function InventoryPage() {
           <div style={{ padding: '64px', textAlign: 'center' }}>
             <div style={{ fontSize: '32px', marginBottom: '12px' }}>📦</div>
             <p style={{ fontSize: '14px', fontWeight: '500', color: '#334155', margin: '0 0 4px' }}>Belum ada item inventaris</p>
-            <p style={{ fontSize: '13px', color: '#94A3B8', margin: 0 }}>Klik "+ Tambah Item" untuk mulai mencatat</p>
+            <p style={{ fontSize: '13px', color: '#94A3B8', margin: 0 }}>
+              {`Klik "+ Tambah Item" untuk mulai mencatat`}
+            </p>
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>

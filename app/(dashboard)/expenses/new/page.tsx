@@ -21,7 +21,7 @@ export default async function NewExpensePage() {
   if (!user) redirect('/login')
 
   // Fetch data master untuk dropdown
-  const [{ data: projects }, { data: employees }] = await Promise.all([
+  const [{ data: projects }, { data: employees }, { data: categories }, { data: subcategories }, { data: vendors }] = await Promise.all([
     supabase
       .from('projects')
       .select('id, name, client_name, status')
@@ -32,12 +32,18 @@ export default async function NewExpensePage() {
       .select('id, full_name, email, nip, job_title, role, status, created_at')
       .eq('status', 'Active')
       .order('full_name'),
+    supabase.from('expense_categories').select('id, name').order('name'),
+    supabase.from('expense_subcategories').select('id, category_id, name').order('name'),
+    supabase.from('vendors').select('id, name').order('name'),
   ])
 
   return (
     <ExpenseForm
       projects={projects ?? []}
       employees={employees ?? []}
+      categories={categories ?? []}
+      subcategories={subcategories ?? []}
+      vendors={vendors ?? []}
     />
   )
 }

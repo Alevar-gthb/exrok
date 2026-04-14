@@ -1,8 +1,11 @@
 import type { PayrollLineAdjustment } from '@/types/database.types'
 
-export function netFromCompensationRows(rows: { kind: string; amount: string | number }[]): number {
+export function netFromCompensationRows(
+  rows: { kind: string; amount: string | number; include_in_monthly_payroll?: boolean }[]
+): number {
   let n = 0
   for (const r of rows) {
+    if (r.include_in_monthly_payroll === false) continue
     const v = Number(r.amount)
     if (!Number.isFinite(v)) continue
     if (r.kind === 'earning') n += v

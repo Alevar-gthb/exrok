@@ -26,6 +26,7 @@ import type {
   EmployeeProjectAssignmentUpdate,
   PayrollRun, PayrollRunInsert, PayrollRunUpdate,
   PayrollRunLine, PayrollRunLineInsert, PayrollRunLineUpdate,
+  PayrollTerRateCard, PayrollTerRateCardInsert, PayrollTerRateCardUpdate,
 } from '@/types/database.types'
 
 export interface Database {
@@ -105,6 +106,11 @@ export interface Database {
         Row: PayrollRunLine
         Insert: PayrollRunLineInsert
         Update: PayrollRunLineUpdate
+      }
+      payroll_ter_rate_cards: {
+        Row: PayrollTerRateCard
+        Insert: PayrollTerRateCardInsert
+        Update: PayrollTerRateCardUpdate
       }
     }
     Views: {

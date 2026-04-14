@@ -14,6 +14,13 @@ interface SubItem {
   href: string
   label: string
   roles: UserRole[]
+  /** Cocokkan pathname persis (untuk /reports agar tidak menandai semua subpath). */
+  exact?: boolean
+}
+
+function isSubrouteActive(pathname: string, href: string, exact?: boolean) {
+  if (exact) return pathname === href
+  return pathname === href || pathname.startsWith(`${href}/`)
 }
 
 interface NavItem {
@@ -104,6 +111,13 @@ const NAV: NavItem[] = [
         <path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
       </svg>
     ),
+    children: [
+      { href: '/reports', label: 'Ringkasan', roles: ['owner', 'finance'], exact: true },
+      { href: '/reports/expenses', label: 'Laporan pengeluaran', roles: ['owner', 'finance'] },
+      { href: '/reports/reimburse', label: 'Laporan reimburse', roles: ['owner', 'finance'] },
+      { href: '/reports/payroll', label: 'Laporan gaji', roles: ['owner', 'finance'] },
+      { href: '/reports/payments', label: 'Laporan pembayaran', roles: ['owner', 'finance'] },
+    ],
   },
   {
     id: 'settings',
@@ -150,10 +164,16 @@ export function SidebarClient({ userName, userRole, employeeId }: SidebarClientP
   }, [supabase, employeeId])
 
   useEffect(() => {
+    if (!employeeId) return
     void fetchApprovalCount()
-    const t = setInterval(() => void fetchApprovalCount(), 60_000)
+    const pollMs = pathname.startsWith('/expenses/') ? 180_000 : 60_000
+    const t = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void fetchApprovalCount()
+      }
+    }, pollMs)
     return () => clearInterval(t)
-  }, [fetchApprovalCount])
+  }, [employeeId, fetchApprovalCount, pathname])
 
   // Track which parent menus are open
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => {
@@ -163,7 +183,7 @@ export function SidebarClient({ userName, userRole, employeeId }: SidebarClientP
         c.roles.includes(userRole as UserRole)
       )
       if (visibleChildren.length > 0) {
-        const childActive = visibleChildren.some(c => pathname.startsWith(c.href))
+        const childActive = visibleChildren.some(c => isSubrouteActive(pathname, c.href, c.exact))
         if (childActive) initial[item.id] = true
       }
     })
@@ -261,7 +281,7 @@ export function SidebarClient({ userName, userRole, employeeId }: SidebarClientP
           const isOpen = openMenus[item.id] ?? false
           const active = !hasChildren && pathname === item.href
           const parentActive = hasChildren
-            ? (visibleChildren.some(c => pathname.startsWith(c.href)) || pathname === item.href)
+            ? (visibleChildren.some(c => isSubrouteActive(pathname, c.href, c.exact)) || pathname === item.href)
             : false
 
           return (
@@ -351,7 +371,7 @@ export function SidebarClient({ userName, userRole, employeeId }: SidebarClientP
                 <div style={{ marginBottom: '4px' }}>
                   {/* Child links */}
                   {visibleChildren.map(child => {
-                      const childActive = pathname.startsWith(child.href)
+                      const childActive = isSubrouteActive(pathname, child.href, child.exact)
                       return (
                         <a
                           key={child.href}

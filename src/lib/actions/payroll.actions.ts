@@ -4,7 +4,6 @@ import type { User } from '@supabase/supabase-js'
 import { createClient } from '@/supabase/server'
 import type { ActionResult } from '@/lib/actions/expense.actions'
 import { insertExpense } from '@/lib/actions/expense.actions'
-import { rpcSubmitExpense } from '@/lib/actions/approval.actions'
 import { netFromAdjustments, parsePayrollAdjustments } from '@/lib/payroll-helpers'
 import { insertPayrollRunForPeriod } from '@/lib/payroll-run-insert'
 import type { PayrollLineAdjustment } from '@/types/database.types'
@@ -117,7 +116,6 @@ export async function submitPayrollRun(runId: string): Promise<ActionResult<{ ex
     const desc = `Gaji ${name} - ${label}`
     const ins = await insertExpense({
       ref_no: null,
-      status: 'Draft',
       transaction_date: transactionDate,
       type: 'Salary',
       description: desc,
@@ -144,10 +142,6 @@ export async function submitPayrollRun(runId: string): Promise<ActionResult<{ ex
     }
     const { error: u1 } = await supabase.from('payroll_run_lines').update({ expense_id: ins.data.id }).eq('id', line.id)
     if (u1) return { success: false, error: u1.message }
-    const sub = await rpcSubmitExpense(ins.data.id)
-    if (!sub.success) {
-      return { success: false, error: sub.error ?? 'Gagal submit expense ke approval.' }
-    }
     count += 1
   }
 

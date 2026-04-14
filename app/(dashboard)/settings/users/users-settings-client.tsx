@@ -50,6 +50,10 @@ export function UsersSettingsClient({ initialRows }: { initialRows: UserRow[] })
   }
 
   async function onDelete(id: string) {
+    const row = data.find(r => r.id === id)
+    if (row?.status === 'Active') {
+      return { error: 'Nonaktifkan karyawan (status Inactive) terlebih dahulu sebelum menghapus.' }
+    }
     const { error } = await supabase.from('employees').delete().eq('id', id)
     if (!error) load()
     return { error: error?.message }
@@ -66,6 +70,7 @@ export function UsersSettingsClient({ initialRows }: { initialRows: UserRow[] })
     <CrudTable
       title="User & role"
       data={data}
+      deleteDisabled={row => row.status === 'Active'}
       fields={[
         { key: 'full_name', label: 'Nama Lengkap', required: true, placeholder: 'Budi Santoso' },
         { key: 'email', label: 'Email', placeholder: 'budi@roketin.com' },

@@ -201,6 +201,7 @@ export function PayrollRunDetailClient({
                 <th style={{ textAlign: 'left', padding: '10px 14px', color: '#475569' }}>Karyawan</th>
                 <th style={{ textAlign: 'left', padding: '10px 14px', color: '#475569' }}>Proyek</th>
                 <th style={{ textAlign: 'right', padding: '10px 14px', color: '#475569' }}>Net</th>
+                <th style={{ textAlign: 'right', padding: '10px 14px', color: '#475569' }}>PPh21 (Excel/System)</th>
                 <th style={{ textAlign: 'left', padding: '10px 14px', color: '#475569' }}>Expense</th>
               </tr>
             </thead>
@@ -235,6 +236,21 @@ export function PayrollRunDetailClient({
                       <AmountEdit initial={line.amount} onSave={amt => saveLineAmount(line.id, amt)} />
                     ) : (
                       formatIDR(line.amount)
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 14px', textAlign: 'right', fontSize: '11px', color: '#475569' }}>
+                    {line.pph21_excel && line.pph21_system ? (
+                      <div>
+                        <div>{formatIDR(line.pph21_excel)}</div>
+                        <div>{formatIDR(line.pph21_system)}</div>
+                        {line.pph21_gap && Number(line.pph21_gap) !== 0 && (
+                          <div style={{ color: Math.abs(Number(line.pph21_gap)) > 500 ? '#B45309' : '#64748B' }}>
+                            gap {formatIDR(line.pph21_gap)}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      '—'
                     )}
                   </td>
                   <td style={{ padding: '12px 14px', fontSize: '12px' }}>

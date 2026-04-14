@@ -6,6 +6,17 @@ import { ExportButton } from '@/components/export-button'
 
 export const metadata = { title: 'Laporan | Exrok' }
 
+const reportCard = {
+  background: '#fff' as const,
+  border: '1px solid #E2E8F0',
+  borderRadius: '12px',
+  padding: '18px 20px',
+  textDecoration: 'none' as const,
+  color: 'inherit' as const,
+  display: 'block' as const,
+  transition: 'border-color .15s, box-shadow .15s',
+}
+
 export default async function ReportsPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -14,7 +25,6 @@ export default async function ReportsPage() {
   const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
   if (!me || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
 
-  // Summary stats
   const { data: expenses } = await supabase
     .from('expenses')
     .select('total_payment, status, type, transaction_date')
@@ -32,14 +42,44 @@ export default async function ReportsPage() {
     { label: 'Total Semua', value: fmt(totalApproved + totalPending), sub: `${expenses?.length ?? 0} transaksi`, color: '#1E3A5F', bg: '#EFF6FF', border: '#BFDBFE' },
   ]
 
+  const links = [
+    {
+      href: '/reports/expenses',
+      title: 'Laporan pengeluaran',
+      desc: 'Per kategori & subkategori berdasarkan tanggal transaksi; filter status, BU, tipe, metode bayar, proyek.',
+      accent: '#1D4ED8',
+      bg: '#EFF6FF',
+    },
+    {
+      href: '/reports/reimburse',
+      title: 'Laporan reimburse',
+      desc: 'Ringkasan batch reimburse seperti sebelumnya.',
+      accent: '#166534',
+      bg: '#F0FDF4',
+    },
+    {
+      href: '/reports/payroll',
+      title: 'Laporan gaji',
+      desc: 'Payroll per bulan: karyawan, bruto, pemotongan, nett.',
+      accent: '#A16207',
+      bg: '#FFFBEB',
+    },
+    {
+      href: '/reports/payments',
+      title: 'Laporan pembayaran',
+      desc: 'Expense dibayar menurut tanggal bayar; filter rentang, BU, tipe, metode bayar, proyek.',
+      accent: '#0F766E',
+      bg: '#F0FDFA',
+    },
+  ]
+
   return (
     <div style={{ padding: '28px 32px' }}>
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ fontSize: '18px', fontWeight: '600', color: '#0F172A', margin: '0 0 4px' }}>Laporan</h1>
-        <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>Ringkasan keuangan dan export data</p>
+        <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>Ringkasan keuangan, submenu laporan, dan export data</p>
       </div>
 
-      {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         {stats.map(s => (
           <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: '12px', padding: '16px 20px' }}>
@@ -50,45 +90,27 @@ export default async function ReportsPage() {
         ))}
       </div>
 
-      {/* Reimburse batch report */}
-      <div
-        style={{
-          background: '#F0FDF4',
-          border: '1px solid #86EFAC',
-          borderRadius: '12px',
-          padding: '20px 24px',
-          marginBottom: '20px',
-        }}
-      >
-        <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#166534', margin: '0 0 4px' }}>
-          Laporan reimburse (batch)
-        </h2>
-        <p style={{ fontSize: '13px', color: '#15803D', margin: '0 0 14px' }}>
-          Ringkasan per karyawan, daftar payable, dan proses payout sekaligus.
-        </p>
-        <Link
-          href="/reports/reimburse"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px 16px',
-            background: '#166534',
-            color: '#fff',
-            borderRadius: '8px',
-            fontSize: '13px',
-            fontWeight: '500',
-            textDecoration: 'none',
-          }}
-        >
-          Buka laporan reimburse
-        </Link>
+      <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A', margin: '0 0 12px' }}>Submenu laporan</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px', marginBottom: '28px' }}>
+        {links.map(L => (
+          <Link
+            key={L.href}
+            href={L.href}
+            style={{
+              ...reportCard,
+              borderLeft: `4px solid ${L.accent}`,
+              background: L.bg,
+            }}
+          >
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A', marginBottom: '6px' }}>{L.title}</div>
+            <p style={{ fontSize: '12px', color: '#64748B', margin: 0, lineHeight: 1.45 }}>{L.desc}</p>
+          </Link>
+        ))}
       </div>
 
-      {/* Export section */}
       <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '24px' }}>
         <h2 style={{ fontSize: '14px', fontWeight: '600', color: '#0F172A', margin: '0 0 4px' }}>Export Laporan Excel</h2>
-        <p style={{ fontSize: '13px', color: '#64748B', margin: '0 0 20px' }}>Download data expense dalam format .xlsx</p>
+        <p style={{ fontSize: '13px', color: '#64748B', margin: '0 0 20px' }}>Download data expense dalam format .xlsx (filter tanggal transaksi di API)</p>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: '16px' }}>
           <div>

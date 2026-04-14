@@ -15,16 +15,34 @@ export interface CrudField {
   readOnly?: boolean
 }
 
+export type CrudDisplayCol = {
+  key: string
+  label: string
+  /** Urut teks (A–Z / Z–A) atau angka (rendah–tinggi / tinggi–rendah). */
+  sortable?: 'text' | 'number'
+  render?: (row: any) => React.ReactNode
+}
+
+export type CrudTableSort = {
+  columnKey: string | null
+  direction: 'asc' | 'desc'
+  onToggleColumn: (columnKey: string) => void
+}
+
 interface CrudTableProps {
   title: string
   data: Record<string, any>[]
   fields: CrudField[]
-  displayCols: { key: string; label: string; render?: (row: any) => React.ReactNode }[]
+  displayCols: CrudDisplayCol[]
   onSave: (values: Record<string, string>) => Promise<{ error?: string }>
   onDelete: (id: string) => Promise<{ error?: string }>
   emptyText?: string
   /** Default true. Set false untuk menyembunyikan aksi hapus (mis. finance). */
   showDelete?: boolean
+  /** Header klik untuk mengurutkan (data sudah diurutkan di luar). */
+  sort?: CrudTableSort
+  /** Jika true, tombol Hapus dinonaktifkan untuk baris tersebut. */
+  deleteDisabled?: (row: Record<string, any>) => boolean
 }
 
 const S = {
@@ -32,7 +50,18 @@ const S = {
   lbl: { display: 'block', fontSize: '12px', fontWeight: '500' as const, color: '#475569', marginBottom: '4px' },
 }
 
-export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, emptyText, showDelete = true }: CrudTableProps) {
+export function CrudTable({
+  title,
+  data,
+  fields,
+  displayCols,
+  onSave,
+  onDelete,
+  emptyText,
+  showDelete = true,
+  sort,
+  deleteDisabled,
+}: CrudTableProps) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Record<string, any> | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
@@ -121,9 +150,66 @@ export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                  {displayCols.map(c => (
-                    <th key={c.key} style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#475569', letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{c.label}</th>
-                  ))}
+                  {displayCols.map(c => {
+                    const active = sort && sort.columnKey === c.key
+                    const hint =
+                      c.sortable === 'number'
+                        ? active
+                          ? sort!.direction === 'asc'
+                            ? 'Angka: rendah → tinggi. Klik untuk tinggi → rendah.'
+                            : 'Angka: tinggi → rendah. Klik untuk mereset urutan.'
+                          : 'Urut angka: rendah–tinggi lalu tinggi–rendah'
+                        : c.sortable === 'text'
+                          ? active
+                            ? sort!.direction === 'asc'
+                              ? 'Teks: A–Z. Klik untuk Z–A.'
+                              : 'Teks: Z–A. Klik untuk mereset urutan.'
+                            : 'Urut teks: A–Z lalu Z–A'
+                          : undefined
+                    return (
+                      <th
+                        key={c.key}
+                        style={{
+                          padding: '10px 14px',
+                          textAlign: 'left',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          color: '#475569',
+                          letterSpacing: '.04em',
+                          textTransform: 'uppercase',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {c.sortable && sort ? (
+                          <button
+                            type="button"
+                            title={hint}
+                            onClick={() => sort.onToggleColumn(c.key)}
+                            style={{
+                              background: active ? '#E0E7FF' : 'transparent',
+                              border: '1px solid transparent',
+                              borderRadius: '6px',
+                              padding: '2px 6px',
+                              margin: '-2px -6px',
+                              cursor: 'pointer',
+                              font: 'inherit',
+                              color: 'inherit',
+                              letterSpacing: 'inherit',
+                              textTransform: 'inherit',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            {c.label}
+                            {active ? <span aria-hidden>{sort.direction === 'asc' ? '↑' : '↓'}</span> : <span style={{ opacity: 0.35 }}>⇅</span>}
+                          </button>
+                        ) : (
+                          c.label
+                        )}
+                      </th>
+                    )
+                  })}
                   <th style={{ padding: '10px 14px', width: showDelete ? '140px' : '80px' }}></th>
                 </tr>
               </thead>
@@ -139,7 +225,21 @@ export function CrudTable({ title, data, fields, displayCols, onSave, onDelete, 
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <button onClick={() => openEdit(row)} style={{ padding: '3px 10px', fontSize: '11px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: 'pointer', color: '#475569' }}>Edit</button>
                         {showDelete && (
-                          <button onClick={() => handleDelete(row.id)} disabled={deleting === row.id} style={{ padding: '3px 10px', fontSize: '11px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '6px', cursor: 'pointer', color: '#991B1B' }}>
+                          <button
+                            type="button"
+                            title={deleteDisabled?.(row) ? 'Nonaktifkan karyawan (status Inactive) sebelum menghapus.' : undefined}
+                            onClick={() => handleDelete(row.id)}
+                            disabled={deleting === row.id || deleteDisabled?.(row)}
+                            style={{
+                              padding: '3px 10px',
+                              fontSize: '11px',
+                              background: deleteDisabled?.(row) ? '#F1F5F9' : '#FEF2F2',
+                              border: `1px solid ${deleteDisabled?.(row) ? '#E2E8F0' : '#FECACA'}`,
+                              borderRadius: '6px',
+                              cursor: deleteDisabled?.(row) ? 'not-allowed' : 'pointer',
+                              color: deleteDisabled?.(row) ? '#94A3B8' : '#991B1B',
+                            }}
+                          >
                             {deleting === row.id ? '...' : 'Hapus'}
                           </button>
                         )}

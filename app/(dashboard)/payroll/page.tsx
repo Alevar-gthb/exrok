@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
 import { PayrollCreateRunForm } from './payroll-create-run-form'
+import { PayrollImportForm } from './payroll-import-form'
 import type { PayrollRun } from '@/types/database.types'
 
 export const metadata = { title: 'Payroll | Exrok' }
@@ -30,6 +31,7 @@ export default async function PayrollPage() {
         Salary per karyawan dan kirim ke alur approval.
       </p>
       <PayrollCreateRunForm />
+      <PayrollImportForm />
       <div
         style={{
           background: '#fff',

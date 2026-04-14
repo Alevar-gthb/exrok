@@ -49,7 +49,7 @@ const inp: React.CSSProperties = {
   fontFamily: 'inherit',
 }
 
-type TemplateRef = Pick<SalaryComponentTemplate, 'code' | 'label' | 'kind'>
+type TemplateRef = Pick<SalaryComponentTemplate, 'code' | 'label' | 'kind' | 'include_in_monthly_payroll'>
 
 type AmountRow = EmployeeSalaryComponentAmount & {
   salary_component_templates: TemplateRef | TemplateRef[] | null
@@ -120,7 +120,11 @@ export function EmployeeDetailClient({
   const recomputeGross = useCallback((rows: AmountRow[]) => {
     const comp = rows.map(r => {
       const t = templateFromRow(r)
-      return { kind: t?.kind ?? 'earning', amount: r.amount }
+      return {
+        kind: t?.kind ?? 'earning',
+        amount: r.amount,
+        include_in_monthly_payroll: t?.include_in_monthly_payroll !== false,
+      }
     })
     const { gross } = summarizeCompensationRows(comp)
     setGrossSalary(gross.toFixed(2))
@@ -133,7 +137,7 @@ export function EmployeeDetailClient({
       sb.from('salary_component_templates').select('*').eq('is_active', true).order('code'),
       sb
         .from('employee_salary_component_amounts')
-        .select('*, salary_component_templates(code,label,kind)')
+        .select('*, salary_component_templates(code,label,kind,include_in_monthly_payroll)')
         .eq('employee_id', employeeId),
       sb
         .from('employee_project_assignments')
@@ -145,7 +149,7 @@ export function EmployeeDetailClient({
         .select('total_payment')
         .eq('employee_id', employeeId)
         .eq('type', 'Salary')
-        .in('status', ['Submitted', 'Pending Approval', 'Approved', 'Paid']),
+        .in('status', ['Pending Approval', 'Approved', 'Paid']),
     ])
     setContracts(
       ((c as EmployeeContract[]) ?? []).map(x => ({
@@ -331,7 +335,7 @@ export function EmployeeDetailClient({
         </p>
         <p style={{ fontSize: '18px', fontWeight: '600', color: '#334155', margin: '0 0 8px' }}>{formatIDR(salaryPaidFromExpenses)}</p>
         <p style={{ fontSize: '12px', color: '#64748B', margin: 0 }}>
-          Bruto = jumlah komponen jenis pemasukan. Nominal di bawah memakai master komponen gaji. Terbayar = akumulasi expense tipe Salary (selain Draft & Rejected).
+          Bruto bulanan = pemasukan dari komponen yang di master ditandai sebagai dasar gaji bulanan reguler (komponen seperti THR bisa dikecualikan). Terbayar = akumulasi expense tipe Salary (selain Draft & Rejected).
         </p>
       </Section>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
@@ -18,10 +18,22 @@ export interface EmployeeListRow {
   net_salary: number
 }
 
+function compareText(a: string | null | undefined, b: string | null | undefined, dir: 'asc' | 'desc') {
+  const sa = (a ?? '').toLowerCase()
+  const sb = (b ?? '').toLowerCase()
+  const c = sa.localeCompare(sb, 'id', { sensitivity: 'base' })
+  return dir === 'asc' ? c : -c
+}
+
+function compareNum(a: number, b: number, dir: 'asc' | 'desc') {
+  return dir === 'asc' ? a - b : b - a
+}
+
 export function EmployeesListClient({ initialRows, myRole }: { initialRows: EmployeeListRow[]; myRole: string }) {
   const supabase = createClient()
   const [rows, setRows] = useState<EmployeeListRow[]>(initialRows)
   const [q, setQ] = useState('')
+  const [tableSort, setTableSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'asc' })
 
   useEffect(() => {
     setRows(initialRows)
@@ -34,13 +46,18 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
       .order('full_name')
     const { data: compRows } = await supabase
       .from('employee_salary_component_amounts')
-      .select('employee_id, amount, salary_component_templates(kind)')
-    const byEmp = new Map<string, { kind: string; amount: string | number }[]>()
+      .select('employee_id, amount, salary_component_templates(kind, include_in_monthly_payroll)')
+    const byEmp = new Map<string, { kind: string; amount: string | number; include_in_monthly_payroll?: boolean }[]>()
     for (const c of compRows ?? []) {
-      const t = c.salary_component_templates as { kind?: string } | { kind?: string }[] | null
-      const kind = (Array.isArray(t) ? t[0]?.kind : t?.kind) ?? 'earning'
+      const t = c.salary_component_templates as
+        | { kind?: string; include_in_monthly_payroll?: boolean }
+        | { kind?: string; include_in_monthly_payroll?: boolean }[]
+        | null
+      const tmpl = Array.isArray(t) ? t[0] : t
+      const kind = tmpl?.kind ?? 'earning'
+      const include_in_monthly_payroll = tmpl?.include_in_monthly_payroll !== false
       const list = byEmp.get(c.employee_id) ?? []
-      list.push({ kind, amount: c.amount })
+      list.push({ kind, amount: c.amount, include_in_monthly_payroll })
       byEmp.set(c.employee_id, list)
     }
     const next: EmployeeListRow[] = (emps ?? []).map(e => {
@@ -70,6 +87,42 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
     )
   }, [rows, q])
 
+  const toggleSortColumn = useCallback((key: string) => {
+    setTableSort(s => {
+      if (s.key !== key) return { key, dir: 'asc' }
+      if (s.dir === 'asc') return { key, dir: 'desc' }
+      return { key: null, dir: 'asc' }
+    })
+  }, [])
+
+  const sortedFiltered = useMemo(() => {
+    const sortColumn = tableSort.key
+    if (!sortColumn) return filtered
+    const dir = tableSort.dir
+    const copy = [...filtered]
+    copy.sort((a, b) => {
+      switch (sortColumn) {
+        case 'nip':
+          return compareText(a.nip, b.nip, dir)
+        case 'full_name':
+          return compareText(a.full_name, b.full_name, dir)
+        case 'job_title':
+          return compareText(a.job_title, b.job_title, dir)
+        case 'status':
+          return compareText(a.status, b.status, dir)
+        case 'net_salary':
+          return compareNum(a.net_salary, b.net_salary, dir)
+        case 'total_deduction':
+          return compareNum(a.total_deduction, b.total_deduction, dir)
+        case 'gross_salary':
+          return compareNum(a.gross_salary, b.gross_salary, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [filtered, tableSort])
+
   async function onSave(values: Record<string, string>) {
     const payload = {
       full_name: values.full_name,
@@ -90,6 +143,10 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
   }
 
   async function onDelete(id: string) {
+    const row = rows.find(r => r.id === id)
+    if (row?.status === 'Active') {
+      return { error: 'Nonaktifkan karyawan (status Inactive) terlebih dahulu sebelum menghapus.' }
+    }
     const { error } = await supabase.from('employees').delete().eq('id', id)
     if (!error) await reload()
     return { error: error?.message }
@@ -122,8 +179,14 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
       </div>
       <CrudTable
         title="karyawan"
-        data={filtered}
+        data={sortedFiltered}
         showDelete={myRole === 'owner'}
+        deleteDisabled={row => row.status === 'Active'}
+        sort={{
+          columnKey: tableSort.key,
+          direction: tableSort.dir,
+          onToggleColumn: toggleSortColumn,
+        }}
         fields={[
           { key: 'nip', label: 'NIP', readOnly: true },
           { key: 'full_name', label: 'Nama lengkap', required: true, placeholder: 'Budi Santoso' },
@@ -131,27 +194,31 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
           { key: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'] },
         ]}
         displayCols={[
-          { key: 'nip', label: 'NIP' },
-          { key: 'full_name', label: 'Nama' },
-          { key: 'job_title', label: 'Jabatan', render: r => r.job_title ?? '—' },
+          { key: 'nip', label: 'NIP', sortable: 'text' },
+          { key: 'full_name', label: 'Nama', sortable: 'text' },
+          { key: 'job_title', label: 'Jabatan', sortable: 'text', render: r => r.job_title ?? '—' },
           {
             key: 'net_salary',
             label: 'Net salary',
+            sortable: 'number',
             render: r => formatIDR(r.net_salary.toFixed(2)),
           },
           {
             key: 'total_deduction',
             label: 'Potongan',
+            sortable: 'number',
             render: r => formatIDR(r.total_deduction.toFixed(2)),
           },
           {
             key: 'gross_salary',
             label: 'Bruto (gaji kotor)',
+            sortable: 'number',
             render: r => formatIDR(r.gross_salary.toFixed(2)),
           },
           {
             key: 'status',
             label: 'Status',
+            sortable: 'text',
             render: r => (
               <span
                 style={{

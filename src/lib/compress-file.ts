@@ -1,7 +1,7 @@
 // ============================================================
 // src/lib/compress-file.ts
 // Client-side file compression sesuai FSD:
-// - Image (JPG/PNG): max-width 1280px, quality 0.8, max 1MB
+// - Image (JPG/PNG): max-width 1280px, quality 0.8, max 2MB
 // - PDF: langsung return tanpa kompresi
 // ============================================================
 
@@ -15,7 +15,7 @@ export interface CompressionResult {
 }
 
 const IMAGE_COMPRESSION_OPTIONS = {
-  maxSizeMB: 1,           // Maksimal 1MB sesuai FSD
+  maxSizeMB: 2,           // Maksimal 2MB
   maxWidthOrHeight: 1280, // Resize ke max 1280px sesuai FSD
   useWebWorker: true,
   initialQuality: 0.8,    // Quality 0.8 sesuai FSD
@@ -24,15 +24,15 @@ const IMAGE_COMPRESSION_OPTIONS = {
 
 /**
  * Kompresi gambar JPG/PNG, bypass untuk PDF.
- * Lempar error jika file melebihi 1MB setelah kompresi.
+ * Lempar error jika PDF melebihi 2MB (gambar dikompresi hingga batas).
  */
 export async function compressFile(file: File): Promise<CompressionResult> {
   const originalSize = file.size
 
   // PDF tidak dikompresi — langsung validasi ukuran
   if (file.type === 'application/pdf') {
-    if (originalSize > 1 * 1024 * 1024) {
-      throw new Error(`File PDF melebihi batas 1MB (ukuran: ${formatBytes(originalSize)})`)
+    if (originalSize > 2 * 1024 * 1024) {
+      throw new Error(`File PDF melebihi batas 2MB (ukuran: ${formatBytes(originalSize)})`)
     }
     return {
       file,
@@ -46,6 +46,9 @@ export async function compressFile(file: File): Promise<CompressionResult> {
   if (file.type === 'image/jpeg' || file.type === 'image/png') {
     try {
       const compressedFile = await imageCompression(file, IMAGE_COMPRESSION_OPTIONS)
+      if (compressedFile.size > 2 * 1024 * 1024) {
+        throw new Error(`Gambar masih di atas 2MB setelah kompresi (${formatBytes(compressedFile.size)})`)
+      }
       return {
         file: compressedFile,
         originalSize,

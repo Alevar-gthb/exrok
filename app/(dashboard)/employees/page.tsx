@@ -24,14 +24,19 @@ export default async function EmployeesPage() {
 
   const { data: compRows } = await supabase
     .from('employee_salary_component_amounts')
-    .select('employee_id, amount, salary_component_templates(kind)')
+    .select('employee_id, amount, salary_component_templates(kind, include_in_monthly_payroll)')
 
-  const byEmp = new Map<string, { kind: string; amount: string | number }[]>()
+  const byEmp = new Map<string, { kind: string; amount: string | number; include_in_monthly_payroll?: boolean }[]>()
   for (const c of compRows ?? []) {
-    const t = c.salary_component_templates as { kind?: string } | { kind?: string }[] | null
-    const kind = (Array.isArray(t) ? t[0]?.kind : t?.kind) ?? 'earning'
+    const t = c.salary_component_templates as
+      | { kind?: string; include_in_monthly_payroll?: boolean }
+      | { kind?: string; include_in_monthly_payroll?: boolean }[]
+      | null
+    const tmpl = Array.isArray(t) ? t[0] : t
+    const kind = tmpl?.kind ?? 'earning'
+    const include_in_monthly_payroll = tmpl?.include_in_monthly_payroll !== false
     const list = byEmp.get(c.employee_id) ?? []
-    list.push({ kind, amount: c.amount })
+    list.push({ kind, amount: c.amount, include_in_monthly_payroll })
     byEmp.set(c.employee_id, list)
   }
 

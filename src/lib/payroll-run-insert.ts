@@ -50,19 +50,29 @@ export async function insertPayrollRunForPeriod(
   }
 
   const ids = employees.map(e => e.id)
-  type CompRow = { employee_id: string; kind: 'earning' | 'deduction'; amount: string | number }
+  type CompRow = {
+    employee_id: string
+    kind: 'earning' | 'deduction'
+    amount: string | number
+    include_in_monthly_payroll?: boolean
+  }
   const { data: compRows } = await supabase
     .from('employee_salary_component_amounts')
-    .select('employee_id, amount, salary_component_templates(kind)')
+    .select('employee_id, amount, salary_component_templates(kind, include_in_monthly_payroll)')
     .in('employee_id', ids)
 
   const comps: CompRow[] = (compRows ?? []).map((r: Record<string, unknown>) => {
-    const t = r.salary_component_templates as { kind?: string } | { kind?: string }[] | null
-    const kind = (Array.isArray(t) ? t[0]?.kind : t?.kind) ?? 'earning'
+    const t = r.salary_component_templates as
+      | { kind?: string; include_in_monthly_payroll?: boolean }
+      | { kind?: string; include_in_monthly_payroll?: boolean }[]
+      | null
+    const tmpl = Array.isArray(t) ? t[0] : t
+    const kind = tmpl?.kind ?? 'earning'
     return {
       employee_id: r.employee_id as string,
       kind: kind as 'earning' | 'deduction',
       amount: r.amount as string | number,
+      include_in_monthly_payroll: tmpl?.include_in_monthly_payroll !== false ? undefined : false,
     }
   })
 
@@ -87,7 +97,11 @@ export async function insertPayrollRunForPeriod(
 
   const lines = employees.map(emp => {
     const crows = compByEmp.get(emp.id) ?? []
-    const forNet = crows.map(c => ({ kind: c.kind, amount: String(c.amount) }))
+    const forNet = crows.map(c => ({
+      kind: c.kind,
+      amount: String(c.amount),
+      include_in_monthly_payroll: c.include_in_monthly_payroll,
+    }))
     const base = netFromCompensationRows(forNet)
     const projectId = pickDefaultProjectId(assignByEmp.get(emp.id) ?? [])
     return {

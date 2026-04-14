@@ -7,6 +7,11 @@ import Decimal from 'decimal.js'
 
 // Konfigurasi presisi global
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP })
+const IDR_FORMATTER = new Intl.NumberFormat('id-ID', {
+  style: 'currency',
+  currency: 'IDR',
+  minimumFractionDigits: 2,
+})
 
 /**
  * Hitung total_payment dari breakdown biaya expense.
@@ -31,11 +36,7 @@ export function calculateTotalPayment(
  */
 export function formatIDR(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return 'Rp 0,00'
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 2,
-  }).format(new Decimal(value.toString()).toNumber())
+  return IDR_FORMATTER.format(new Decimal(value.toString()).toNumber())
 }
 
 /**

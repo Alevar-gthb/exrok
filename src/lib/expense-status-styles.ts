@@ -4,7 +4,6 @@ export const EXPENSE_STATUS_STYLE: Record<
   { bg: string; color: string; border: string; label: string }
 > = {
   Draft: { bg: '#F8FAFC', color: '#475569', border: '#E2E8F0', label: 'Draft' },
-  Submitted: { bg: '#EFF6FF', color: '#1D4ED8', border: '#BFDBFE', label: 'Submitted' },
   'Pending Approval': { bg: '#FFFBEB', color: '#92400E', border: '#FCD34D', label: 'Menunggu' },
   Approved: { bg: '#F0FDF4', color: '#166534', border: '#86EFAC', label: 'Disetujui' },
   Rejected: { bg: '#FEF2F2', color: '#991B1B', border: '#FECACA', label: 'Ditolak' },

@@ -2,7 +2,7 @@
 
 // ============================================================
 // src/components/expense-table.tsx
-// Tabel expense dengan filter, status badge, submit draft
+// Tabel expense dengan filter, status badge, submit draft (legacy Draft)
 // ============================================================
 
 import { useState, useTransition } from 'react'
@@ -114,7 +114,6 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inputStyle}>
           <option value="">Semua status</option>
           <option value="Draft">Draft</option>
-          <option value="Submitted">Submitted</option>
           <option value="Pending Approval">Menunggu</option>
           <option value="Approved">Disetujui</option>
           <option value="Rejected">Ditolak</option>
@@ -163,7 +162,7 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                  {['Tanggal', 'Ref / Deskripsi', 'Tipe', 'Proyek', 'Total', 'Status', 'Aksi'].map(h => (
+                  {['Tanggal transaksi', 'Ref / Deskripsi', 'Tipe', 'Proyek', 'Total', 'Status', 'Aksi'].map(h => (
                     <th key={h} style={{
                       padding: '10px 14px', textAlign: 'left',
                       fontSize: '11px', fontWeight: '600', color: '#475569',

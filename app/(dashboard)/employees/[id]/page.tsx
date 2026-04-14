@@ -28,13 +28,18 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
 
   const { data: amountRows } = await supabase
     .from('employee_salary_component_amounts')
-    .select('amount, salary_component_templates(kind)')
+    .select('amount, salary_component_templates(kind, include_in_monthly_payroll)')
     .eq('employee_id', params.id)
 
   const compForSummary = (amountRows ?? []).map((r: Record<string, unknown>) => {
-    const t = r.salary_component_templates as { kind?: string } | { kind?: string }[] | null
-    const kind = (Array.isArray(t) ? t[0]?.kind : t?.kind) ?? 'earning'
-    return { kind, amount: r.amount as string | number }
+    const t = r.salary_component_templates as
+      | { kind?: string; include_in_monthly_payroll?: boolean }
+      | { kind?: string; include_in_monthly_payroll?: boolean }[]
+      | null
+    const tmpl = Array.isArray(t) ? t[0] : t
+    const kind = tmpl?.kind ?? 'earning'
+    const include_in_monthly_payroll = tmpl?.include_in_monthly_payroll !== false
+    return { kind, amount: r.amount as string | number, include_in_monthly_payroll }
   })
   const { gross: grossSalary } = summarizeCompensationRows(compForSummary)
 
@@ -43,7 +48,7 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
     .select('total_payment')
     .eq('employee_id', params.id)
     .eq('type', 'Salary')
-    .in('status', ['Submitted', 'Pending Approval', 'Approved', 'Paid'])
+    .in('status', ['Pending Approval', 'Approved', 'Paid'])
 
   const totalPaidFromExpenses = (salaryRows ?? []).reduce((acc, row: { total_payment: string | number }) => {
     const v = typeof row.total_payment === 'string' ? row.total_payment : String(row.total_payment)

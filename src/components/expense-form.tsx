@@ -1,28 +1,32 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import {
   expenseSchema, expenseDefaultValues, PAYMENT_METHODS,
   type ExpenseFormValues,
 } from '@/lib/validations/expense.schema'
-import { insertExpense, updateExpense, uploadExpenseDocument } from '@/lib/actions/expense.actions'
-import { compressFile, formatBytes } from '@/lib/compress-file'
-import { calculateTotalPayment, formatIDR, calculateVAT } from '@/lib/decimal'
+import { createExpenseWithDocument, updateExpense, uploadExpenseDocument } from '@/lib/actions/expense.actions'
+import { calculateTotalPayment, formatIDR } from '@/lib/decimal'
+import { useOcrFill } from '@/lib/ocr/use-ocr-fill'
 import type { Project, ExpenseFormEmployee } from '@/types/database.types'
-import { createClient } from '@/supabase/client'
 
 interface ExpenseFormProps {
   projects: Project[]
   employees: ExpenseFormEmployee[]
+  categories: Category[]
+  subcategories: Subcategory[]
+  vendors: Vendor[]
   /** Mode edit: isi expense yang sudah ada (Draft / Rejected) */
   mode?: 'create' | 'edit'
   expenseId?: string
   initialValues?: Partial<ExpenseFormValues>
   existingDocumentUrl?: string | null
 }
+type DocumentOcrPhase = 'idle' | 'scanning' | 'success' | 'error'
+
 interface FilePreview {
   name: string; type: string; originalSize: number; compressedSize?: number
   wasCompressed?: boolean; previewUrl?: string; compressedFile?: File
@@ -31,6 +35,12 @@ interface FilePreview {
 interface Category { id: string; name: string }
 interface Subcategory { id: string; category_id: string; name: string }
 interface Vendor { id: string; name: string }
+
+const formatBytes = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
 
 // ─── Shared styles ────────────────────────────────────────────
 const inp: React.CSSProperties = {
@@ -65,24 +75,39 @@ function Section({ title, badge, children }: { title: string; badge?: React.Reac
   )
 }
 
-function CurrencyInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function CurrencyInput({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
   const fmt = (v: string) => v && v !== '0' ? Math.round(parseFloat(v)).toLocaleString('id-ID') : ''
   const [display, setDisplay] = useState(fmt(value))
   useEffect(() => { setDisplay(fmt(value)) }, [value])
   return (
     <div style={{ position: 'relative' }}>
       <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: '#94A3B8', pointerEvents: 'none' }}>Rp</span>
-      <input type="text" inputMode="numeric" value={display}
+      <input type="text" inputMode="numeric" value={display} disabled={disabled}
         onChange={e => { const r = e.target.value.replace(/[^0-9]/g, ''); setDisplay(r ? parseInt(r).toLocaleString('id-ID') : ''); onChange(r || '0') }}
-        style={{ ...inp, paddingLeft: '32px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}
+        style={{ ...inp, paddingLeft: '32px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: disabled ? 0.55 : 1, cursor: disabled ? 'not-allowed' : undefined }}
         onFocus={fo} onBlur={fb} />
     </div>
   )
 }
 
-function FileDropzone({ preview, onFileSelect, onRemove }: { preview: FilePreview | null; onFileSelect: (f: File) => void; onRemove: () => void }) {
+function FileDropzone({
+  preview,
+  onFileSelect,
+  onRemove,
+  ocrPhase = 'idle',
+  ocrErrorMsg,
+  ocrLowFields,
+}: {
+  preview: FilePreview | null
+  onFileSelect: (f: File) => void
+  onRemove: () => void
+  ocrPhase?: DocumentOcrPhase
+  ocrErrorMsg?: string | null
+  ocrLowFields?: string[] | null
+}) {
   const [isDrag, setIsDrag] = useState(false)
   if (preview) {
+    const showOcrRow = !preview.isCompressing && !preview.error
     return (
       <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '12px', background: '#F8FAFC', position: 'relative' }}>
         <button type="button" onClick={onRemove} style={{ position: 'absolute', top: '8px', right: '8px', width: '22px', height: '22px', borderRadius: '50%', border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontSize: '14px', color: '#94A3B8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
@@ -102,6 +127,22 @@ function FileDropzone({ preview, onFileSelect, onRemove }: { preview: FilePrevie
                 {preview.wasCompressed && preview.compressedSize && <span style={{ color: '#059669', marginLeft: '6px' }}>→ {formatBytes(preview.compressedSize)} ✓</span>}
               </p>
             )}
+            {showOcrRow && ocrPhase === 'scanning' && (
+              <p style={{ fontSize: '11px', color: '#B45309', margin: '6px 0 0' }}>⏳ Membaca bon…</p>
+            )}
+            {showOcrRow && ocrPhase === 'success' && (
+              <>
+                <p style={{ fontSize: '11px', color: '#059669', margin: '6px 0 0' }}>✓ Form diisi dari bon. Periksa sebelum submit.</p>
+                {ocrLowFields && ocrLowFields.length > 0 && (
+                  <p style={{ fontSize: '11px', color: '#B45309', margin: '4px 0 0' }}>Periksa ulang: {ocrLowFields.join(', ')}</p>
+                )}
+              </>
+            )}
+            {showOcrRow && ocrPhase === 'error' && ocrErrorMsg && (
+              <p style={{ fontSize: '11px', color: '#B45309', margin: '6px 0 0' }}>
+                ⚠ {ocrErrorMsg} — file tetap digunakan; isi form manual jika perlu.
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -114,7 +155,7 @@ function FileDropzone({ preview, onFileSelect, onRemove }: { preview: FilePrevie
       <span style={{ fontSize: '24px' }}>📎</span>
       <div>
         <p style={{ fontSize: '13px', fontWeight: '500', color: '#475569', margin: '0 0 2px' }}>Tarik file ke sini atau <span style={{ color: '#3B82F6', textDecoration: 'underline' }}>pilih file</span></p>
-        <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0 }}>JPG, PNG, PDF · Maks. 1MB</p>
+        <p style={{ fontSize: '11px', color: '#94A3B8', margin: 0 }}>JPG, PNG, PDF · Maks. 2MB</p>
       </div>
       <input type="file" accept=".jpg,.jpeg,.png,.pdf" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) onFileSelect(f); e.target.value = '' }} />
     </label>
@@ -144,34 +185,43 @@ function TotalBreakdown({ amount, vat, adminFee, serviceFee }: { amount: string;
 export function ExpenseForm({
   projects,
   employees,
+  categories,
+  subcategories,
+  vendors,
   mode = 'create',
   expenseId,
   initialValues,
   existingDocumentUrl,
 }: ExpenseFormProps) {
   const router = useRouter()
-  const supabase = createClient()
   const [filePreview, setFilePreview] = useState<FilePreview | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitResult, setSubmitResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [categories, setCategories] = useState<Category[]>([])
-  const [subcategories, setSubcategories] = useState<Subcategory[]>([])
-  const [vendors, setVendors] = useState<Vendor[]>([])
 
-  const mergedDefaults = { ...expenseDefaultValues, ...initialValues } as Partial<ExpenseFormValues>
+  const mergedDefaults = {
+    ...expenseDefaultValues,
+    ...initialValues,
+    document_url: existingDocumentUrl ?? '',
+  } as Partial<ExpenseFormValues>
 
-  const { register, handleSubmit, watch, setValue, formState: { errors }, reset, clearErrors, setError } = useForm<ExpenseFormValues>({
+  const { register, handleSubmit, control, setValue, formState: { errors }, reset, clearErrors, setError } = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseSchema), defaultValues: mergedDefaults as ExpenseFormValues, mode: 'onChange',
   })
 
-  const [amount, vat, adminFee, serviceFee, expenseType, categoryId] = watch(['amount', 'vat', 'admin_fee', 'service_fee', 'type', 'category_id'])
+  const uploadGenRef = useRef(0)
+  const [ocrPhase, setOcrPhase] = useState<DocumentOcrPhase>('idle')
+  const [ocrErrorMsg, setOcrErrorMsg] = useState<string | null>(null)
+  const [ocrLowFields, setOcrLowFields] = useState<string[] | null>(null)
+  const { fillFromOcr } = useOcrFill(setValue)
 
-  // Load master data
-  useEffect(() => {
-    supabase.from('expense_categories').select('id, name').order('name').then(({ data }) => { if (data) setCategories(data) })
-    supabase.from('expense_subcategories').select('id, category_id, name').order('name').then(({ data }) => { if (data) setSubcategories(data) })
-    supabase.from('vendors').select('id, name').order('name').then(({ data }) => { if (data) setVendors(data) })
-  }, [])
+  const [amount, vat, adminFee, serviceFee, categoryId, hasVat] = useWatch({
+    control,
+    name: ['amount', 'vat', 'admin_fee', 'service_fee', 'category_id', 'has_vat'],
+  })
+  const [amountInput, vatInput, adminFeeInput, serviceFeeInput] = useWatch({
+    control,
+    name: ['amount', 'vat', 'admin_fee', 'service_fee'],
+  })
 
   // Filter subcat by selected category
   const filteredSubcats = categoryId ? subcategories.filter(s => s.category_id === categoryId) : subcategories
@@ -179,63 +229,135 @@ export function ExpenseForm({
   // Reset subcategory when category changes
   useEffect(() => { setValue('subcategory_id', '') }, [categoryId, setValue])
 
-  // Auto VAT 11% for PO
   useEffect(() => {
-    if (expenseType === 'PO' && amount && parseFloat(amount) > 0) setValue('vat', calculateVAT(amount))
-  }, [amount, expenseType, setValue])
+    if (hasVat === false) setValue('vat', '0', { shouldValidate: true })
+  }, [hasVat, setValue])
+
+  const clearDocumentOcr = useCallback(() => {
+    uploadGenRef.current += 1
+    setOcrPhase('idle')
+    setOcrErrorMsg(null)
+    setOcrLowFields(null)
+  }, [])
 
   const handleFileSelect = useCallback(async (file: File) => {
-    setFilePreview({ name: file.name, type: file.type, originalSize: file.size, isCompressing: file.type !== 'application/pdf', previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined })
+    const myGen = ++uploadGenRef.current
+    setOcrPhase('idle')
+    setOcrErrorMsg(null)
+    setOcrLowFields(null)
+
+    setFilePreview({
+      name: file.name,
+      type: file.type,
+      originalSize: file.size,
+      isCompressing: file.type !== 'application/pdf',
+      previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined,
+    })
     clearErrors('document')
+
     try {
+      const { compressFile } = await import('@/lib/compress-file')
       const result = await compressFile(file)
-      setFilePreview(prev => prev ? { ...prev, compressedSize: result.compressedSize, wasCompressed: result.wasCompressed, compressedFile: result.file, isCompressing: false } : null)
+      if (myGen !== uploadGenRef.current) return
+
+      setFilePreview(prev =>
+        prev
+          ? {
+              ...prev,
+              compressedSize: result.compressedSize,
+              wasCompressed: result.wasCompressed,
+              compressedFile: result.file,
+              isCompressing: false,
+            }
+          : null,
+      )
+
+      setOcrPhase('scanning')
+      try {
+        const { postReceiptOcrFromFile } = await import('@/lib/ocr/receipt-ocr-client')
+        const ocrResult = await postReceiptOcrFromFile(result.file)
+        if (myGen !== uploadGenRef.current) return
+        fillFromOcr(ocrResult)
+        setOcrPhase('success')
+        setOcrLowFields(ocrResult.low_confidence_fields ?? [])
+        setOcrErrorMsg(null)
+      } catch (ocrErr) {
+        if (myGen !== uploadGenRef.current) return
+        setOcrPhase('error')
+        setOcrErrorMsg(ocrErr instanceof Error ? ocrErr.message : 'Gagal membaca bon')
+        setOcrLowFields(null)
+      }
     } catch (e) {
+      if (myGen !== uploadGenRef.current) return
       const msg = e instanceof Error ? e.message : 'Gagal memproses file'
-      setFilePreview(prev => prev ? { ...prev, error: msg, isCompressing: false } : null)
+      setFilePreview(prev => (prev ? { ...prev, error: msg, isCompressing: false } : null))
       setError('document', { message: msg })
+      setOcrPhase('idle')
     }
-  }, [clearErrors, setError])
+  }, [clearErrors, setError, fillFromOcr])
 
   const onSubmit = async (values: ExpenseFormValues) => {
     setIsSubmitting(true); setSubmitResult(null)
     try {
-      let documentUrl: string | undefined
-      if (filePreview && !filePreview.error && !filePreview.isCompressing) {
-        const fd = new FormData(); fd.append('file', filePreview.compressedFile ?? (values.document as File))
-        const up = await uploadExpenseDocument(fd)
-        if (!up.success) { setError('document', { message: up.error }); setIsSubmitting(false); return }
-        documentUrl = up.data?.url
-      }
+      const vatEffective = values.has_vat ? (values.vat || '0') : '0'
       const basePayload = {
         transaction_date: values.transaction_date, type: values.type, description: values.description,
         project_id: values.project_id || null, employee_id: values.employee_id || null,
-        amount: values.amount, vat: values.vat || '0', admin_fee: values.admin_fee || '0', service_fee: values.service_fee || '0',
+        amount: values.amount, vat: vatEffective, admin_fee: values.admin_fee || '0', service_fee: values.service_fee || '0',
         category_id: values.category_id || null, subcategory_id: values.subcategory_id || null,
         vendor_id: values.vendor_id || null,
         business_unit: (values.business_unit as 'RKT' | 'SPH') || null,
         department: values.department || null, payment_method: values.payment_method || null,
         due_date: values.due_date || null,
         payment_date: null,
-        document_url: documentUrl ?? existingDocumentUrl ?? null, is_reconciled: false,
+        is_reconciled: false,
+        ocr_scanned: Boolean(values.ocr_scanned),
+        ocr_confidence: values.ocr_confidence ?? null,
+        ocr_scanned_at: values.ocr_scanned ? new Date().toISOString() : null,
       }
       if (mode === 'edit' && expenseId) {
-        const result = await updateExpense(expenseId, basePayload)
+        let documentUrl: string | undefined
+        if (filePreview && !filePreview.error && !filePreview.isCompressing) {
+          const fd = new FormData(); fd.append('file', filePreview.compressedFile ?? (values.document as File))
+          const up = await uploadExpenseDocument(fd)
+          if (!up.success) { setError('document', { message: up.error }); setIsSubmitting(false); return }
+          documentUrl = up.data?.url
+        }
+        const payload = {
+          ...basePayload,
+          document_url: documentUrl ?? existingDocumentUrl ?? null,
+        }
+        const result = await updateExpense(expenseId, payload)
         if (result.success) {
-          setSubmitResult({ type: 'success', message: 'Perubahan disimpan' })
-          setTimeout(() => router.push(`/expenses/${expenseId}`), 1200)
+          setSubmitResult({ type: 'success', message: 'Perubahan disimpan dan approval diproses.' })
+          setTimeout(() => router.push(`/expenses/${expenseId}`), 900)
         } else { setSubmitResult({ type: 'error', message: result.error ?? 'Terjadi kesalahan' }) }
       } else {
-        const result = await insertExpense({
+        const submitData = new FormData()
+        if (filePreview && !filePreview.error && !filePreview.isCompressing) {
+          submitData.set('file', filePreview.compressedFile ?? (values.document as File))
+        }
+        submitData.set('payload', JSON.stringify({
           ...basePayload,
+          document_url: existingDocumentUrl ?? null,
           ref_no: null,
-          status: 'Draft',
           reimbursement_batch_id: null,
-        })
-        if (result.success) {
-          setSubmitResult({ type: 'success', message: `Expense berhasil diajukan${result.data?.ref_no ? ` · ${result.data.ref_no}` : ''}` })
-          reset(expenseDefaultValues); setFilePreview(null)
-          setTimeout(() => router.push('/expenses'), 1500)
+        }))
+        const result = await createExpenseWithDocument(submitData)
+        if (result.success && result.data) {
+          const d = result.data
+          const tail = [d.ref_no, d.message].filter(Boolean).join(' · ')
+          setSubmitResult({
+            type: 'success',
+            message: tail ? `Expense tersimpan · ${tail}` : 'Expense tersimpan.',
+          })
+          reset(expenseDefaultValues)
+          setFilePreview(null)
+          uploadGenRef.current += 1
+          setOcrPhase('idle')
+          setOcrErrorMsg(null)
+          setOcrLowFields(null)
+          setTimeout(() => router.push(`/expenses/${d.id}`), 900)
         } else { setSubmitResult({ type: 'error', message: result.error ?? 'Terjadi kesalahan' }) }
       }
     } catch (e) {
@@ -259,7 +381,7 @@ export function ExpenseForm({
               {mode === 'edit' ? 'Edit expense' : 'Pengajuan Pengeluaran'}
             </h1>
             <p style={{ fontSize: '12px', color: '#64748B', margin: 0 }}>
-              {mode === 'edit' ? 'Perbarui data lalu submit ulang dari halaman detail' : 'Isi form untuk mengajukan expense baru'}
+              {mode === 'edit' ? 'Perbarui data; approval diproses otomatis setelah simpan' : 'Isi form — status langsung mengikuti approval rules'}
             </p>
           </div>
         </div>
@@ -269,10 +391,27 @@ export function ExpenseForm({
       <div style={{ maxWidth: '780px', margin: '0 auto', padding: '20px 16px' }}>
         <form onSubmit={handleSubmit(onSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
+          {/* Dokumen */}
+          <Section title="Dokumen Pendukung">
+            <FileDropzone
+              preview={filePreview}
+              onFileSelect={handleFileSelect}
+              onRemove={() => {
+                clearDocumentOcr()
+                setFilePreview(null)
+                clearErrors('document')
+              }}
+              ocrPhase={ocrPhase}
+              ocrErrorMsg={ocrErrorMsg}
+              ocrLowFields={ocrLowFields}
+            />
+            {errors.document && <p style={{ ...err, marginTop: '6px' }}>{errors.document.message as string}</p>}
+          </Section>
+
           {/* Informasi Transaksi */}
           <Section title="Informasi Transaksi">
             <div style={grid}>
-              <Field label="Tanggal" required error={errors.transaction_date?.message}>
+              <Field label="Tanggal transaksi" required error={errors.transaction_date?.message}>
                 <input type="date" {...register('transaction_date')} style={inp} onFocus={fo} onBlur={fb} />
               </Field>
               <Field label="Tipe" required error={errors.type?.message}>
@@ -354,19 +493,34 @@ export function ExpenseForm({
           </Section>
 
           {/* Rincian Biaya */}
-          <Section title="Rincian Biaya" badge={expenseType === 'PO' ? <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE', fontWeight: '500' }}>VAT 11% otomatis</span> : undefined}>
+          <Section title="Rincian Biaya">
             <div style={grid}>
               <Field label="DPP (Amount)" required error={errors.amount?.message}>
-                <CurrencyInput value={watch('amount') || ''} onChange={v => setValue('amount', v, { shouldValidate: true })} />
+                <CurrencyInput value={amountInput || ''} onChange={v => setValue('amount', v, { shouldValidate: true })} />
+              </Field>
+              <Field label="Kena PPN (VAT)" error={errors.has_vat?.message}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#334155', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={!!hasVat}
+                    onChange={e => setValue('has_vat', e.target.checked, { shouldDirty: true, shouldValidate: true })}
+                    style={{ width: '16px', height: '16px', accentColor: '#1D4ED8' }}
+                  />
+                  <span>Ada PPN — isi nominal VAT di bawah</span>
+                </label>
               </Field>
               <Field label="VAT / PPN" error={errors.vat?.message}>
-                <CurrencyInput value={watch('vat') || ''} onChange={v => setValue('vat', v)} />
+                <CurrencyInput
+                  value={vatInput || ''}
+                  onChange={v => setValue('vat', v)}
+                  disabled={!hasVat}
+                />
               </Field>
               <Field label="Admin Fee" error={errors.admin_fee?.message}>
-                <CurrencyInput value={watch('admin_fee') || ''} onChange={v => setValue('admin_fee', v)} />
+                <CurrencyInput value={adminFeeInput || ''} onChange={v => setValue('admin_fee', v)} />
               </Field>
               <Field label="Service Fee" error={errors.service_fee?.message}>
-                <CurrencyInput value={watch('service_fee') || ''} onChange={v => setValue('service_fee', v)} />
+                <CurrencyInput value={serviceFeeInput || ''} onChange={v => setValue('service_fee', v)} />
               </Field>
               <Field label="Due Date" error={errors.due_date?.message}>
                 <input type="date" {...register('due_date')} style={inp} onFocus={fo} onBlur={fb} />
@@ -375,12 +529,6 @@ export function ExpenseForm({
             <div style={{ marginTop: '16px' }}>
               <TotalBreakdown amount={amount || ''} vat={vat || ''} adminFee={adminFee || ''} serviceFee={serviceFee || ''} />
             </div>
-          </Section>
-
-          {/* Dokumen */}
-          <Section title="Dokumen Pendukung">
-            <FileDropzone preview={filePreview} onFileSelect={handleFileSelect} onRemove={() => { setFilePreview(null); clearErrors('document') }} />
-            {errors.document && <p style={{ ...err, marginTop: '6px' }}>{errors.document.message as string}</p>}
           </Section>
 
           {/* Status */}
@@ -394,9 +542,14 @@ export function ExpenseForm({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '14px 20px', flexWrap: 'wrap', gap: '10px' }}>
             <button type="button" onClick={() => router.back()} style={{ padding: '8px 16px', fontSize: '13px', background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' }}>Batal</button>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button type="button" onClick={() => { reset(expenseDefaultValues); setFilePreview(null); setSubmitResult(null) }}
+              <button type="button" onClick={() => {
+                reset(expenseDefaultValues)
+                clearDocumentOcr()
+                setFilePreview(null)
+                setSubmitResult(null)
+              }}
                 style={{ padding: '8px 16px', fontSize: '13px', background: '#fff', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', color: '#475569' }}>Reset</button>
-              <button type="submit" disabled={isSubmitting || !!filePreview?.isCompressing}
+              <button type="submit" disabled={isSubmitting || !!filePreview?.isCompressing || ocrPhase === 'scanning'}
                 style={{ padding: '8px 24px', fontSize: '13px', fontWeight: '500', minWidth: '130px', background: isSubmitting ? '#94A3B8' : '#0F172A', color: '#fff', border: 'none', borderRadius: '8px', cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
                 {isSubmitting ? 'Menyimpan...' : mode === 'edit' ? 'Simpan perubahan' : 'Ajukan Expense'}
               </button>

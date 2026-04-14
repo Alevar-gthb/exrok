@@ -12,7 +12,6 @@ export type ProjectStatus = 'Active' | 'Completed' | 'On Hold'
 export type ExpenseType = 'PO' | 'Reimburse' | 'Salary'
 export type ExpenseStatus =
   | 'Draft'
-  | 'Submitted'
   | 'Pending Approval'
   | 'Approved'
   | 'Rejected'
@@ -35,6 +34,12 @@ export interface Employee {
   job_title: string | null
   /** Jika true, modul kontrak/perpanjangan tidak diperlukan (karyawan tetap). */
   is_permanent: boolean
+  /** Nomor NPWP (opsional). */
+  npwp: string | null
+  /** Status pajak pada payroll import: Gross/Net. */
+  tax_status: 'Gross' | 'Net' | null
+  /** Status PTKP seperti TK/0, K/1, dst. */
+  ptkp_status: string | null
   created_at: string          // TIMESTAMPTZ → ISO string
 }
 
@@ -81,15 +86,23 @@ export interface Expense {
   payment_method: string | null
   due_date: string | null
   payment_date: string | null
+  /** Bukti bayar (PDF/JPG/PNG) setelah ditandai Paid */
+  payment_proof_url: string | null
   reimbursement_batch_id: string | null
   document_url: string | null
   is_reconciled: boolean
+  /** Setelah migration OCR di Supabase. */
+  ocr_scanned?: boolean | null
+  ocr_confidence?: number | null
+  ocr_scanned_at?: string | null
   created_by: string | null   // UUID → auth.users.id
   created_at: string
 }
 
-// Insert tidak menyertakan `total_payment` (Generated Column di DB)
-export type ExpenseInsert = Omit<Expense, 'id' | 'total_payment' | 'created_at'>
+// Insert tidak menyertakan `total_payment` (Generated Column di DB). Bukti bayar hanya setelah Paid.
+export type ExpenseInsert = Omit<Expense, 'id' | 'total_payment' | 'created_at' | 'payment_proof_url'> & {
+  payment_proof_url?: string | null
+}
 export type ExpenseUpdate = Partial<ExpenseInsert>
 
 // Expense dengan relasi JOIN (untuk tampilan di tabel)
@@ -105,6 +118,10 @@ export interface ApprovalRule {
   name: string
   business_unit: 'RKT' | 'SPH' | null
   expense_type: ExpenseType | null
+  /** Non-empty: hanya cocok jika payment_method expense sama persis dengan salah satu nilai. */
+  payment_methods: string[] | null
+  /** Non-empty: expense dengan metode ini tidak cocok (mis. kecuali Petty Cash). */
+  excluded_payment_methods: string[] | null
   min_amount: string
   max_amount: string | null
   require_approval: boolean
@@ -184,6 +201,8 @@ export interface SalaryComponentTemplate {
   label: string
   kind: CompensationKind
   is_active: boolean
+  /** false = tidak masuk ringkasan gaji bulanan (mis. THR). */
+  include_in_monthly_payroll: boolean
   created_at: string
 }
 
@@ -250,14 +269,46 @@ export interface PayrollRunLine {
   base_amount: string | null
   adjustments: PayrollLineAdjustment[]
   components_snapshot: Record<string, unknown> | null
+  gross_income: string | null
+  ter_category: 'A' | 'B' | 'C' | null
+  ter_rate: string | null
+  pph21_excel: string | null
+  pph21_system: string | null
+  pph21_gap: string | null
   expense_id: string | null
   created_at: string
 }
 
 export type PayrollRunLineInsert = Omit<PayrollRunLine, 'id' | 'created_at'>
 export type PayrollRunLineUpdate = Partial<
-  Pick<PayrollRunLine, 'project_id' | 'amount' | 'base_amount' | 'adjustments' | 'components_snapshot' | 'expense_id'>
+  Pick<
+    PayrollRunLine,
+    | 'project_id'
+    | 'amount'
+    | 'base_amount'
+    | 'adjustments'
+    | 'components_snapshot'
+    | 'gross_income'
+    | 'ter_category'
+    | 'ter_rate'
+    | 'pph21_excel'
+    | 'pph21_system'
+    | 'pph21_gap'
+    | 'expense_id'
+  >
 >
+
+export interface PayrollTerRateCard {
+  id: string
+  category: 'A' | 'B' | 'C'
+  brackets: Array<{ max: number; rate: number }>
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type PayrollTerRateCardInsert = Omit<PayrollTerRateCard, 'id' | 'created_at' | 'updated_at'>
+export type PayrollTerRateCardUpdate = Partial<Pick<PayrollTerRateCard, 'brackets' | 'is_active'>>
 
 // ─── 3. INVENTORY ────────────────────────────────────────────
 
