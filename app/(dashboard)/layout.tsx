@@ -2,17 +2,15 @@
 import { createClient } from '@/supabase/server'
 import { redirect } from 'next/navigation'
 import { SidebarClient } from '@/components/sidebar-client'
+import { parseEmployeeRecord } from '@/lib/employee-session'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase
-    .from('employees')
-    .select('id, full_name, role')
-    .eq('email', user.email ?? '')
-    .single()
+  const { data: empJson } = await supabase.rpc('get_my_employee_record')
+  const me = parseEmployeeRecord(empJson)
 
   if (!me) redirect('/login')
 

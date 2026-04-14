@@ -6,13 +6,11 @@
 // ============================================================
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/supabase/client'
 
 type Mode = 'login' | 'forgot'
 
 export default function LoginPage() {
-  const router = useRouter()
   const supabase = createClient()
 
   const [mode, setMode] = useState<Mode>('login')
@@ -35,7 +33,10 @@ export default function LoginPage() {
       return
     }
 
-    router.replace('/dashboard')
+    // Hard navigation: setelah sign-in, session harus ada di cookie sebelum
+    // middleware/RSC baca auth. router.replace kadang terlalu cepat sehingga
+    // request /dashboard tidak bawa cookie → mental ke /login lagi.
+    window.location.assign('/dashboard')
   }
 
   async function handleForgot(e: React.FormEvent) {
