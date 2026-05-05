@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
 import { UsersSettingsClient } from './users-settings-client'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 
 export default async function SettingsUsersPage() {
   const supabase = await createClient()
@@ -9,9 +10,10 @@ export default async function SettingsUsersPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me) redirect('/login')
 
-  if (me?.role !== 'owner') {
+  if (me.role !== 'owner') {
     redirect('/expenses')
   }
 

@@ -1,11 +1,34 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
+import { useCrudTableSort } from '@/lib/crud-table-sort'
+import { compareText } from '@/lib/table-sort'
 
 export default function ProjectsPage() {
   const supabase = createClient()
   const [data, setData] = useState<any[]>([])
+  const { tableSort, sortProp } = useCrudTableSort()
+
+  const sortedData = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return data
+    const dir = tableSort.dir
+    const copy = [...data]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'name':
+          return compareText(a.name, b.name, dir)
+        case 'client_name':
+          return compareText(a.client_name, b.client_name, dir)
+        case 'status':
+          return compareText(a.status, b.status, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [data, tableSort])
 
   async function load() {
     const { data: d } = await supabase.from('projects').select('*').order('name')
@@ -31,16 +54,17 @@ export default function ProjectsPage() {
   return (
     <CrudTable
       title="Proyek"
-      data={data}
+      data={sortedData}
+      sort={sortProp}
       fields={[
         { key: 'name', label: 'Nama Proyek', required: true, placeholder: 'Daya Group' },
         { key: 'client_name', label: 'Nama Klien', placeholder: 'PT Daya' },
         { key: 'status', label: 'Status', type: 'select', options: ['Active', 'Completed', 'On Hold'] },
       ]}
       displayCols={[
-        { key: 'name', label: 'Nama Proyek' },
-        { key: 'client_name', label: 'Klien' },
-        { key: 'status', label: 'Status', render: row => (
+        { key: 'name', label: 'Nama Proyek', sortable: 'text' },
+        { key: 'client_name', label: 'Klien', sortable: 'text' },
+        { key: 'status', label: 'Status', sortable: 'text', render: row => (
           <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500', background: row.status === 'Active' ? '#F0FDF4' : '#F8FAFC', color: row.status === 'Active' ? '#166534' : '#64748B', border: `1px solid ${row.status === 'Active' ? '#86EFAC' : '#E2E8F0'}` }}>{row.status}</span>
         )},
       ]}

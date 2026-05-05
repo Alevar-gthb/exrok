@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatIDR } from '@/lib/decimal'
 import { findMatchingRule } from '@/lib/approval-rule-match'
@@ -11,6 +11,14 @@ import {
   updateApprovalRule,
 } from '@/lib/actions/approval-rules.actions'
 import { PAYMENT_METHODS } from '@/lib/validations/expense.schema'
+import { SortableTh, StaticTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 function formatAmountCondition(r: ApprovalRule): string {
   const min = parseFloat(r.min_amount)
@@ -69,6 +77,48 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
   /** all = tidak filter metode; only = whitelist; except = blacklist */
   const [pmMode, setPmMode] = useState<'all' | 'only' | 'except'>('all')
   const [selectedPm, setSelectedPm] = useState<string[]>([])
+
+  const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+  const toggleSort = useCallback((key: string) => {
+    setTableSort(s => cycleColumnSort(s, key))
+  }, [])
+
+  const baseRules = useMemo(
+    () => [...initialRules].sort((a, b) => a.priority - b.priority),
+    [initialRules],
+  )
+
+  const displayedRules = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return baseRules
+    const dir = tableSort.dir
+    const copy = [...baseRules]
+    copy.sort((a, b) => {
+      const approverName = (id: string | null) => approvers.find(x => x.id === id)?.full_name ?? ''
+      switch (key) {
+        case 'priority':
+          return compareNum(a.priority, b.priority, dir)
+        case 'name':
+          return compareText(a.name, b.name, dir)
+        case 'amount':
+          return compareNum(parseDecimalString(a.min_amount), parseDecimalString(b.min_amount), dir)
+        case 'scope': {
+          const sa = `${a.expense_type ?? ''} ${a.business_unit ?? ''} ${formatPaymentCondition(a)}`
+          const sb = `${b.expense_type ?? ''} ${b.business_unit ?? ''} ${formatPaymentCondition(b)}`
+          return compareText(sa, sb, dir)
+        }
+        case 'approver':
+          return compareText(approverName(a.approver_employee_id), approverName(b.approver_employee_id), dir)
+        case 'approval':
+          return compareNum(a.require_approval ? 1 : 0, b.require_approval ? 1 : 0, dir)
+        case 'status':
+          return compareNum(a.is_active ? 1 : 0, b.is_active ? 1 : 0, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [baseRules, tableSort, approvers])
 
   const [simAmount, setSimAmount] = useState('')
   const [simBu, setSimBu] = useState<'RKT' | 'SPH'>('RKT')
@@ -247,15 +297,74 @@ export function ApprovalRulesClient({ initialRules, approvers }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '720px' }}>
           <thead>
             <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              {['Prioritas', 'Nama', 'Amount', 'Tipe / BU / Metode', 'Approver', 'Approval', 'Status', 'Aksi'].map(h => (
-                <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#475569', textTransform: 'uppercase' }}>
-                  {h}
-                </th>
-              ))}
+              <SortableTh
+                label="Prioritas"
+                columnKey="priority"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="number"
+                compact
+              />
+              <SortableTh
+                label="Nama"
+                columnKey="name"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Amount"
+                columnKey="amount"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="number"
+                compact
+              />
+              <SortableTh
+                label="Tipe / BU / Metode"
+                columnKey="scope"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Approver"
+                columnKey="approver"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Approval"
+                columnKey="approval"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="number"
+                compact
+              />
+              <SortableTh
+                label="Status"
+                columnKey="status"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSort}
+                kind="number"
+                compact
+              />
+              <StaticTh compact>Aksi</StaticTh>
             </tr>
           </thead>
           <tbody>
-            {[...initialRules].sort((a, b) => a.priority - b.priority).map(r => {
+            {displayedRules.map(r => {
               const ap = approvers.find(x => x.id === r.approver_employee_id)
               return (
                 <tr key={r.id} style={{ borderBottom: '1px solid #F1F5F9' }}>

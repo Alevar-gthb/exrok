@@ -1,9 +1,17 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatIDR } from '@/lib/decimal'
 import { rpcBulkProcessApproval, rpcProcessApproval } from '@/lib/actions/approval.actions'
+import { SortableTh, StaticTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 export type ApprovalInboxRow = {
   id: string
@@ -42,6 +50,11 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
   const [filterMax, setFilterMax] = useState('')
   const [rejectModal, setRejectModal] = useState<{ ids: string[] } | null>(null)
   const [rejectNotes, setRejectNotes] = useState('')
+  const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  const toggleSortColumn = useCallback((key: string) => {
+    setTableSort(s => cycleColumnSort(s, key))
+  }, [])
 
   const filtered = useMemo(() => {
     return rows.filter((r: ApprovalInboxRow) => {
@@ -55,6 +68,40 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
       return true
     })
   }, [rows, filterType, filterBu, filterMin, filterMax])
+
+  const sortedFiltered = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return filtered
+    const dir = tableSort.dir
+    const copy = [...filtered]
+    copy.sort((a, b) => {
+      const ea = a.expense
+      const eb = b.expense
+      if (!ea || !eb) return 0
+      switch (key) {
+        case 'detail': {
+          const ta = `${ea.description ?? ''} ${ea.employee?.full_name ?? ''} ${a.approval_rule?.name ?? ''}`
+          const tb = `${eb.description ?? ''} ${eb.employee?.full_name ?? ''} ${b.approval_rule?.name ?? ''}`
+          return compareText(ta, tb, dir)
+        }
+        case 'type':
+          return compareText(ea.type, eb.type, dir)
+        case 'amount':
+          return compareNum(
+            parseDecimalString(ea.total_payment),
+            parseDecimalString(eb.total_payment),
+            dir,
+          )
+        case 'business_unit':
+          return compareText(ea.business_unit, eb.business_unit, dir)
+        case 'transaction_date':
+          return compareText(ea.transaction_date, eb.transaction_date, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [filtered, tableSort])
 
   const selectedIds = Object.entries(selected).filter(([, v]) => v).map(([k]) => k)
   const selectedTotal = useMemo(() => {
@@ -206,19 +253,59 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '800px' }}>
           <thead>
             <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-              <th style={{ padding: '10px 12px', width: '36px' }}>
+              <StaticTh width="36px" compact>
                 <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-              </th>
-              <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#475569' }}>Deskripsi / Pengaju</th>
-              <th style={{ padding: '10px 12px' }}>Tipe</th>
-              <th style={{ padding: '10px 12px' }}>Amount</th>
-              <th style={{ padding: '10px 12px' }}>BU</th>
-              <th style={{ padding: '10px 12px' }}>Tanggal</th>
-              <th style={{ padding: '10px 12px' }}>Aksi</th>
+              </StaticTh>
+              <SortableTh
+                label="Deskripsi / Pengaju"
+                columnKey="detail"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSortColumn}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Tipe"
+                columnKey="type"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSortColumn}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Amount"
+                columnKey="amount"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSortColumn}
+                kind="number"
+                compact
+              />
+              <SortableTh
+                label="BU"
+                columnKey="business_unit"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSortColumn}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Tanggal"
+                columnKey="transaction_date"
+                activeKey={tableSort.key}
+                direction={tableSort.dir}
+                onToggle={toggleSortColumn}
+                kind="text"
+                compact
+              />
+              <StaticTh compact>Aksi</StaticTh>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => {
+            {sortedFiltered.map((r, i) => {
               const e = r.expense
               if (!e) return null
               const isSel = !!selected[r.id]
@@ -227,7 +314,7 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
                   key={r.id}
                   onClick={() => router.push(`/expenses/${e.id}`)}
                   style={{
-                    borderBottom: i < filtered.length - 1 ? '1px solid #F1F5F9' : 'none',
+                    borderBottom: i < sortedFiltered.length - 1 ? '1px solid #F1F5F9' : 'none',
                     background: isSel ? '#EFF6FF' : '#fff',
                     cursor: 'pointer',
                   }}
@@ -279,7 +366,7 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
             })}
           </tbody>
         </table>
-        {filtered.length === 0 && (
+        {sortedFiltered.length === 0 && (
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8', fontSize: '14px' }}>Tidak ada approval pending</div>
         )}
       </div>

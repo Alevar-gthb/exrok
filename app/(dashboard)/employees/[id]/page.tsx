@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { EmployeeDetailClient } from '@/components/employee-detail-client'
 import Decimal from 'decimal.js'
 import { summarizeCompensationRows } from '@/lib/compensation-summary'
@@ -13,8 +14,8 @@ export default async function EmployeeDetailPage({ params }: { params: { id: str
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) {
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) {
     redirect('/expenses')
   }
 

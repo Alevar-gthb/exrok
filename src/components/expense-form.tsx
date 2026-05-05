@@ -8,7 +8,7 @@ import {
   expenseSchema, expenseDefaultValues, PAYMENT_METHODS,
   type ExpenseFormValues,
 } from '@/lib/validations/expense.schema'
-import { createExpenseWithDocument, updateExpense, uploadExpenseDocument } from '@/lib/actions/expense.actions'
+import { createExpenseVendor, createExpenseWithDocument, updateExpense, uploadExpenseDocument } from '@/lib/actions/expense.actions'
 import { calculateTotalPayment, formatIDR } from '@/lib/decimal'
 import { useOcrFill } from '@/lib/ocr/use-ocr-fill'
 import type { Project, ExpenseFormEmployee } from '@/types/database.types'
@@ -196,6 +196,14 @@ export function ExpenseForm({
   const router = useRouter()
   const [filePreview, setFilePreview] = useState<FilePreview | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [vendorOptions, setVendorOptions] = useState<Vendor[]>(vendors)
+  const [addVendorOpen, setAddVendorOpen] = useState(false)
+  const [isSavingVendor, setIsSavingVendor] = useState(false)
+  const [newVendorName, setNewVendorName] = useState('')
+  const [newVendorType, setNewVendorType] = useState('')
+  const [newVendorContact, setNewVendorContact] = useState('')
+  const [newVendorNotes, setNewVendorNotes] = useState('')
+  const [addVendorError, setAddVendorError] = useState<string | null>(null)
   const [submitResult, setSubmitResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   const mergedDefaults = {
@@ -232,6 +240,10 @@ export function ExpenseForm({
   useEffect(() => {
     if (hasVat === false) setValue('vat', '0', { shouldValidate: true })
   }, [hasVat, setValue])
+
+  useEffect(() => {
+    setVendorOptions(vendors)
+  }, [vendors])
 
   const clearDocumentOcr = useCallback(() => {
     uploadGenRef.current += 1
@@ -301,6 +313,7 @@ export function ExpenseForm({
     try {
       const vatEffective = values.has_vat ? (values.vat || '0') : '0'
       const basePayload = {
+        submission_date: values.submission_date,
         transaction_date: values.transaction_date, type: values.type, description: values.description,
         project_id: values.project_id || null, employee_id: values.employee_id || null,
         amount: values.amount, vat: vatEffective, admin_fee: values.admin_fee || '0', service_fee: values.service_fee || '0',
@@ -365,6 +378,43 @@ export function ExpenseForm({
     } finally { setIsSubmitting(false) }
   }
 
+  const handleCreateVendor = async () => {
+    const name = newVendorName.trim()
+    if (!name) {
+      setAddVendorError('Nama vendor wajib diisi')
+      return
+    }
+
+    setIsSavingVendor(true)
+    setAddVendorError(null)
+    const result = await createExpenseVendor({
+      name,
+      type: newVendorType,
+      contact: newVendorContact,
+      notes: newVendorNotes,
+    })
+    setIsSavingVendor(false)
+
+    if (!result.success || !result.data) {
+      setAddVendorError(result.error ?? 'Gagal menyimpan vendor')
+      return
+    }
+
+    const inserted: Vendor = { id: result.data.id, name: result.data.name }
+    setVendorOptions(prev => {
+      const merged = [...prev, inserted]
+      merged.sort((a, b) => a.name.localeCompare(b.name, 'id-ID'))
+      return merged
+    })
+    setValue('vendor_id', inserted.id, { shouldDirty: true, shouldValidate: true })
+    setNewVendorName('')
+    setNewVendorType('')
+    setNewVendorContact('')
+    setNewVendorNotes('')
+    setAddVendorError(null)
+    setAddVendorOpen(false)
+  }
+
   // Mobile-responsive grid: 1 col on small, 2 col on wide
   const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }
 
@@ -411,6 +461,9 @@ export function ExpenseForm({
           {/* Informasi Transaksi */}
           <Section title="Informasi Transaksi">
             <div style={grid}>
+              <Field label="Tanggal pengajuan" required error={errors.submission_date?.message}>
+                <input type="date" {...register('submission_date')} style={inp} onFocus={fo} onBlur={fb} />
+              </Field>
               <Field label="Tanggal transaksi" required error={errors.transaction_date?.message}>
                 <input type="date" {...register('transaction_date')} style={inp} onFocus={fo} onBlur={fb} />
               </Field>
@@ -478,12 +531,111 @@ export function ExpenseForm({
                 </select>
               </Field>
               <Field label="Vendor" error={errors.vendor_id?.message}>
-                <select {...register('vendor_id')} style={inp} onFocus={fo} onBlur={fb}>
-                  <option value="">Pilih vendor...</option>
-                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <select {...register('vendor_id')} style={inp} onFocus={fo} onBlur={fb}>
+                    <option value="">Pilih vendor...</option>
+                    {vendorOptions.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                  {!addVendorOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddVendorOpen(true)
+                        setAddVendorError(null)
+                      }}
+                      style={{
+                        alignSelf: 'flex-start',
+                        padding: '6px 10px',
+                        fontSize: '12px',
+                        borderRadius: '8px',
+                        border: '1px solid #DBEAFE',
+                        background: '#EFF6FF',
+                        color: '#1D4ED8',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      + Tambah vendor baru
+                    </button>
+                  ) : (
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '10px', background: '#F8FAFC', display: 'grid', gap: '8px' }}>
+                      <input
+                        type="text"
+                        value={newVendorName}
+                        onChange={e => setNewVendorName(e.target.value)}
+                        placeholder="Nama vendor baru"
+                        style={inp}
+                        onFocus={fo}
+                        onBlur={fb}
+                      />
+                      <input
+                        type="text"
+                        value={newVendorType}
+                        onChange={e => setNewVendorType(e.target.value)}
+                        placeholder="Tipe (opsional)"
+                        style={inp}
+                        onFocus={fo}
+                        onBlur={fb}
+                      />
+                      <input
+                        type="text"
+                        value={newVendorContact}
+                        onChange={e => setNewVendorContact(e.target.value)}
+                        placeholder="Kontak (opsional)"
+                        style={inp}
+                        onFocus={fo}
+                        onBlur={fb}
+                      />
+                      <textarea
+                        value={newVendorNotes}
+                        onChange={e => setNewVendorNotes(e.target.value)}
+                        placeholder="Catatan (opsional)"
+                        rows={2}
+                        style={{ ...inp, resize: 'vertical' }}
+                        onFocus={fo}
+                        onBlur={fb}
+                      />
+                      {addVendorError && <p style={err}>{addVendorError}</p>}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={() => void handleCreateVendor()}
+                          disabled={isSavingVendor}
+                          style={{
+                            padding: '7px 12px',
+                            fontSize: '12px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: isSavingVendor ? '#94A3B8' : '#0F172A',
+                            color: '#fff',
+                            cursor: isSavingVendor ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {isSavingVendor ? 'Menyimpan...' : 'Simpan vendor'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAddVendorOpen(false)
+                            setAddVendorError(null)
+                          }}
+                          style={{
+                            padding: '7px 12px',
+                            fontSize: '12px',
+                            borderRadius: '8px',
+                            border: '1px solid #E2E8F0',
+                            background: '#fff',
+                            color: '#475569',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Batal
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </Field>
-              <Field label="Metode Pembayaran" error={errors.payment_method?.message}>
+              <Field label="Metode Pembayaran" required error={errors.payment_method?.message}>
                 <select {...register('payment_method')} style={inp} onFocus={fo} onBlur={fb}>
                   <option value="">Pilih metode...</option>
                   {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}

@@ -3,8 +3,10 @@ import type { CSSProperties } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { formatIDR } from '@/lib/decimal'
 import { PAYMENT_METHODS } from '@/lib/validations/expense.schema'
+import { PaymentsReportTable } from '@/components/payments-report-table'
 
 export const metadata = { title: 'Laporan pembayaran | Exrok' }
 
@@ -50,8 +52,8 @@ export default async function PaymentsReportPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
 
   const def = defaultRange()
   const from = typeof searchParams.from === 'string' && searchParams.from ? searchParams.from : def.from
@@ -60,7 +62,7 @@ export default async function PaymentsReportPage({
   const type = typeof searchParams.type === 'string' && ['PO', 'Reimburse', 'Salary'].includes(searchParams.type) ? searchParams.type : ''
   const paymentMethodRaw = typeof searchParams.pm === 'string' ? searchParams.pm : ''
   const paymentMethodNone = paymentMethodRaw === '__none__'
-  const paymentMethod = !paymentMethodNone && PAYMENT_METHODS.includes(paymentMethodRaw) ? paymentMethodRaw : ''
+  const paymentMethod = !paymentMethodNone && (PAYMENT_METHODS as readonly string[]).includes(paymentMethodRaw) ? paymentMethodRaw : ''
   const projectRaw = typeof searchParams.project_id === 'string' ? searchParams.project_id : ''
   const projectNone = projectRaw === '__none__'
   const projectId = projectRaw && !projectNone && /^[0-9a-f-]{36}$/i.test(projectRaw) ? projectRaw : ''
@@ -226,46 +228,7 @@ export default async function PaymentsReportPage({
           Tidak ada pembayaran untuk filter ini.
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-              <thead>
-                <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569' }}>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Tanggal bayar</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Tanggal transaksi</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Ref</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Deskripsi</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Tipe</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>BU</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Metode pembayaran</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Proyek</th>
-                  <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: '600' }}>Kategori</th>
-                  <th style={{ textAlign: 'right', padding: '10px 14px', fontWeight: '600' }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((e, i) => (
-                  <tr key={e.id} style={{ borderBottom: i < rows.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
-                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>{e.payment_date}</td>
-                    <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: '#64748B' }}>{e.transaction_date}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <Link href={`/expenses/${e.id}`} style={{ color: '#2563EB', textDecoration: 'none' }}>
-                        {e.ref_no ?? e.id.slice(0, 8)}
-                      </Link>
-                    </td>
-                    <td style={{ padding: '10px 14px', maxWidth: '200px', color: '#334155' }}>{e.description ?? '—'}</td>
-                    <td style={{ padding: '10px 14px' }}>{e.type}</td>
-                    <td style={{ padding: '10px 14px' }}>{e.business_unit ?? '—'}</td>
-                    <td style={{ padding: '10px 14px' }}>{e.payment_method ?? '—'}</td>
-                    <td style={{ padding: '10px 14px' }}>{e.project?.name ?? '—'}</td>
-                    <td style={{ padding: '10px 14px' }}>{e.category?.name ?? '—'}</td>
-                    <td style={{ padding: '10px 14px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatIDR(e.total_payment)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PaymentsReportTable rows={rows} />
       )}
     </div>
   )

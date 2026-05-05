@@ -1,11 +1,13 @@
 'use client'
 
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
+import { useCrudTableSort } from '@/lib/crud-table-sort'
 import { formatIDR } from '@/lib/decimal'
 import { summarizeCompensationRows } from '@/lib/compensation-summary'
+import { compareNum, compareText } from '@/lib/table-sort'
 
 export interface EmployeeListRow {
   id: string
@@ -18,22 +20,11 @@ export interface EmployeeListRow {
   net_salary: number
 }
 
-function compareText(a: string | null | undefined, b: string | null | undefined, dir: 'asc' | 'desc') {
-  const sa = (a ?? '').toLowerCase()
-  const sb = (b ?? '').toLowerCase()
-  const c = sa.localeCompare(sb, 'id', { sensitivity: 'base' })
-  return dir === 'asc' ? c : -c
-}
-
-function compareNum(a: number, b: number, dir: 'asc' | 'desc') {
-  return dir === 'asc' ? a - b : b - a
-}
-
 export function EmployeesListClient({ initialRows, myRole }: { initialRows: EmployeeListRow[]; myRole: string }) {
   const supabase = createClient()
   const [rows, setRows] = useState<EmployeeListRow[]>(initialRows)
   const [q, setQ] = useState('')
-  const [tableSort, setTableSort] = useState<{ key: string | null; dir: 'asc' | 'desc' }>({ key: null, dir: 'asc' })
+  const { tableSort, sortProp } = useCrudTableSort()
 
   useEffect(() => {
     setRows(initialRows)
@@ -86,14 +77,6 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
         (r.job_title && r.job_title.toLowerCase().includes(s))
     )
   }, [rows, q])
-
-  const toggleSortColumn = useCallback((key: string) => {
-    setTableSort(s => {
-      if (s.key !== key) return { key, dir: 'asc' }
-      if (s.dir === 'asc') return { key, dir: 'desc' }
-      return { key: null, dir: 'asc' }
-    })
-  }, [])
 
   const sortedFiltered = useMemo(() => {
     const sortColumn = tableSort.key
@@ -182,11 +165,7 @@ export function EmployeesListClient({ initialRows, myRole }: { initialRows: Empl
         data={sortedFiltered}
         showDelete={myRole === 'owner'}
         deleteDisabled={row => row.status === 'Active'}
-        sort={{
-          columnKey: tableSort.key,
-          direction: tableSort.dir,
-          onToggleColumn: toggleSortColumn,
-        }}
+        sort={sortProp}
         fields={[
           { key: 'nip', label: 'NIP', readOnly: true },
           { key: 'full_name', label: 'Nama lengkap', required: true, placeholder: 'Budi Santoso' },

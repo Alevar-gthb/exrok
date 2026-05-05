@@ -1,10 +1,18 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { formatIDR } from '@/lib/decimal'
 import { createReimbursementBatch } from '@/lib/actions/reimbursement.actions'
+import { SortableTh, StaticTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 export type ReimburseReportExpenseRow = {
   id: string
@@ -94,6 +102,24 @@ export function ReimburseReportClient({
   const [referenceNo, setReferenceNo] = useState('')
   const [notes, setNotes] = useState('')
 
+  const [sortSummary, setSortSummary] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+  const [sortPayable, setSortPayable] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+  const [sortPaidList, setSortPaidList] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+  const [sortBatches, setSortBatches] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  const toggleSummary = useCallback((key: string) => {
+    setSortSummary(s => cycleColumnSort(s, key))
+  }, [])
+  const togglePayable = useCallback((key: string) => {
+    setSortPayable(s => cycleColumnSort(s, key))
+  }, [])
+  const togglePaidList = useCallback((key: string) => {
+    setSortPaidList(s => cycleColumnSort(s, key))
+  }, [])
+  const toggleBatches = useCallback((key: string) => {
+    setSortBatches(s => cycleColumnSort(s, key))
+  }, [])
+
   const payableRows = useMemo(
     () =>
       expenses.filter(
@@ -116,6 +142,116 @@ export function ReimburseReportClient({
     () => buildSummary(listRows),
     [listRows],
   )
+
+  const sortedSummaryRows = useMemo(() => {
+    const key = sortSummary.key
+    if (!key) return summaryRows
+    const dir = sortSummary.dir
+    const copy = [...summaryRows]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'name':
+          return compareText(a.name, b.name, dir)
+        case 'count':
+          return compareNum(a.count, b.count, dir)
+        case 'total':
+          return compareNum(a.total, b.total, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [summaryRows, sortSummary])
+
+  const sortedPayableRows = useMemo(() => {
+    const key = sortPayable.key
+    if (!key) return payableRows
+    const dir = sortPayable.dir
+    const copy = [...payableRows]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'ref_no':
+          return compareText(a.ref_no, b.ref_no, dir)
+        case 'transaction_date':
+          return compareText(a.transaction_date, b.transaction_date, dir)
+        case 'type':
+          return compareText(a.type, b.type, dir)
+        case 'employee':
+          return compareText(a.employee?.full_name, b.employee?.full_name, dir)
+        case 'business_unit':
+          return compareText(a.business_unit, b.business_unit, dir)
+        case 'total':
+          return compareNum(
+            parseDecimalString(a.total_payment),
+            parseDecimalString(b.total_payment),
+            dir,
+          )
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [payableRows, sortPayable])
+
+  const sortedListRows = useMemo(() => {
+    const key = sortPaidList.key
+    if (!key) return listRows
+    const dir = sortPaidList.dir
+    const copy = [...listRows]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'ref_no':
+          return compareText(a.ref_no, b.ref_no, dir)
+        case 'transaction_date':
+          return compareText(a.transaction_date, b.transaction_date, dir)
+        case 'type':
+          return compareText(a.type, b.type, dir)
+        case 'employee':
+          return compareText(a.employee?.full_name, b.employee?.full_name, dir)
+        case 'payment_date':
+          return compareText(a.payment_date, b.payment_date, dir)
+        case 'total':
+          return compareNum(
+            parseDecimalString(a.total_payment),
+            parseDecimalString(b.total_payment),
+            dir,
+          )
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [listRows, sortPaidList])
+
+  const sortedBatches = useMemo(() => {
+    const key = sortBatches.key
+    if (!key) return batches
+    const dir = sortBatches.dir
+    const copy = [...batches]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'batch_no':
+          return compareText(a.batch_no, b.batch_no, dir)
+        case 'batch_date':
+          return compareText(a.batch_date, b.batch_date, dir)
+        case 'payment_method':
+          return compareText(a.payment_method, b.payment_method, dir)
+        case 'reference_no':
+          return compareText(a.reference_no, b.reference_no, dir)
+        case 'item_count':
+          return compareNum(a.item_count, b.item_count, dir)
+        case 'total':
+          return compareNum(
+            parseDecimalString(a.total_amount),
+            parseDecimalString(b.total_amount),
+            dir,
+          )
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [batches, sortBatches])
 
   const selectedIds = Object.entries(selected)
     .filter(([, v]) => v)
@@ -415,20 +551,46 @@ export function ReimburseReportClient({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
-                <th style={{ textAlign: 'left', padding: '8px 10px' }}>Karyawan</th>
-                <th style={{ textAlign: 'right', padding: '8px 10px' }}>Jumlah</th>
-                <th style={{ textAlign: 'right', padding: '8px 10px' }}>Total</th>
+                <SortableTh
+                  label="Karyawan"
+                  columnKey="name"
+                  activeKey={sortSummary.key}
+                  direction={sortSummary.dir}
+                  onToggle={toggleSummary}
+                  kind="text"
+                  compact
+                />
+                <SortableTh
+                  label="Jumlah"
+                  columnKey="count"
+                  activeKey={sortSummary.key}
+                  direction={sortSummary.dir}
+                  onToggle={toggleSummary}
+                  kind="number"
+                  align="right"
+                  compact
+                />
+                <SortableTh
+                  label="Total"
+                  columnKey="total"
+                  activeKey={sortSummary.key}
+                  direction={sortSummary.dir}
+                  onToggle={toggleSummary}
+                  kind="number"
+                  align="right"
+                  compact
+                />
               </tr>
             </thead>
             <tbody>
-              {summaryRows.length === 0 ? (
+              {sortedSummaryRows.length === 0 ? (
                 <tr>
                   <td colSpan={3} style={{ padding: '16px', color: '#64748B' }}>
                     Tidak ada data untuk filter ini.
                   </td>
                 </tr>
               ) : (
-                summaryRows.map(row => (
+                sortedSummaryRows.map(row => (
                   <tr key={row.employee_id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                     <td style={{ padding: '10px' }}>{row.name}</td>
                     <td style={{ padding: '10px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
@@ -476,20 +638,69 @@ export function ReimburseReportClient({
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
-                  <th style={{ width: 36, padding: '8px' }}>
+                  <StaticTh width={36} compact>
                     <input
                       type="checkbox"
                       checked={allSelected}
                       onChange={toggleAll}
                       disabled={!allSelectableIds.length}
                     />
-                  </th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Ref</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Tanggal</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Tipe</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Karyawan</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>BU</th>
-                  <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total</th>
+                  </StaticTh>
+                  <SortableTh
+                    label="Ref"
+                    columnKey="ref_no"
+                    activeKey={sortPayable.key}
+                    direction={sortPayable.dir}
+                    onToggle={togglePayable}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Tanggal"
+                    columnKey="transaction_date"
+                    activeKey={sortPayable.key}
+                    direction={sortPayable.dir}
+                    onToggle={togglePayable}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Tipe"
+                    columnKey="type"
+                    activeKey={sortPayable.key}
+                    direction={sortPayable.dir}
+                    onToggle={togglePayable}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Karyawan"
+                    columnKey="employee"
+                    activeKey={sortPayable.key}
+                    direction={sortPayable.dir}
+                    onToggle={togglePayable}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="BU"
+                    columnKey="business_unit"
+                    activeKey={sortPayable.key}
+                    direction={sortPayable.dir}
+                    onToggle={togglePayable}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Total"
+                    columnKey="total"
+                    activeKey={sortPayable.key}
+                    direction={sortPayable.dir}
+                    onToggle={togglePayable}
+                    kind="number"
+                    align="right"
+                    compact
+                  />
                 </tr>
               </thead>
               <tbody>
@@ -500,7 +711,7 @@ export function ReimburseReportClient({
                     </td>
                   </tr>
                 ) : (
-                  payableRows.map(e => (
+                  sortedPayableRows.map(e => (
                     <tr key={e.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                       <td style={{ padding: '8px' }}>
                         <input
@@ -641,12 +852,61 @@ export function ReimburseReportClient({
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Ref</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Tanggal</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Tipe</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Karyawan</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px' }}>Bayar</th>
-                  <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total</th>
+                  <SortableTh
+                    label="Ref"
+                    columnKey="ref_no"
+                    activeKey={sortPaidList.key}
+                    direction={sortPaidList.dir}
+                    onToggle={togglePaidList}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Tanggal"
+                    columnKey="transaction_date"
+                    activeKey={sortPaidList.key}
+                    direction={sortPaidList.dir}
+                    onToggle={togglePaidList}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Tipe"
+                    columnKey="type"
+                    activeKey={sortPaidList.key}
+                    direction={sortPaidList.dir}
+                    onToggle={togglePaidList}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Karyawan"
+                    columnKey="employee"
+                    activeKey={sortPaidList.key}
+                    direction={sortPaidList.dir}
+                    onToggle={togglePaidList}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Bayar"
+                    columnKey="payment_date"
+                    activeKey={sortPaidList.key}
+                    direction={sortPaidList.dir}
+                    onToggle={togglePaidList}
+                    kind="text"
+                    compact
+                  />
+                  <SortableTh
+                    label="Total"
+                    columnKey="total"
+                    activeKey={sortPaidList.key}
+                    direction={sortPaidList.dir}
+                    onToggle={togglePaidList}
+                    kind="number"
+                    align="right"
+                    compact
+                  />
                 </tr>
               </thead>
               <tbody>
@@ -657,7 +917,7 @@ export function ReimburseReportClient({
                     </td>
                   </tr>
                 ) : (
-                  listRows.map(e => (
+                  sortedListRows.map(e => (
                     <tr key={e.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                       <td style={{ padding: '8px 6px' }}>{e.ref_no ?? '—'}</td>
                       <td style={{ padding: '8px 6px' }}>{e.transaction_date}</td>
@@ -706,12 +966,62 @@ export function ReimburseReportClient({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
-                <th style={{ textAlign: 'left', padding: '8px 6px' }}>No. batch</th>
-                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Tanggal</th>
-                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Metode</th>
-                <th style={{ textAlign: 'left', padding: '8px 6px' }}>Referensi</th>
-                <th style={{ textAlign: 'right', padding: '8px 6px' }}>Item</th>
-                <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total</th>
+                <SortableTh
+                  label="No. batch"
+                  columnKey="batch_no"
+                  activeKey={sortBatches.key}
+                  direction={sortBatches.dir}
+                  onToggle={toggleBatches}
+                  kind="text"
+                  compact
+                />
+                <SortableTh
+                  label="Tanggal"
+                  columnKey="batch_date"
+                  activeKey={sortBatches.key}
+                  direction={sortBatches.dir}
+                  onToggle={toggleBatches}
+                  kind="text"
+                  compact
+                />
+                <SortableTh
+                  label="Metode"
+                  columnKey="payment_method"
+                  activeKey={sortBatches.key}
+                  direction={sortBatches.dir}
+                  onToggle={toggleBatches}
+                  kind="text"
+                  compact
+                />
+                <SortableTh
+                  label="Referensi"
+                  columnKey="reference_no"
+                  activeKey={sortBatches.key}
+                  direction={sortBatches.dir}
+                  onToggle={toggleBatches}
+                  kind="text"
+                  compact
+                />
+                <SortableTh
+                  label="Item"
+                  columnKey="item_count"
+                  activeKey={sortBatches.key}
+                  direction={sortBatches.dir}
+                  onToggle={toggleBatches}
+                  kind="number"
+                  align="right"
+                  compact
+                />
+                <SortableTh
+                  label="Total"
+                  columnKey="total"
+                  activeKey={sortBatches.key}
+                  direction={sortBatches.dir}
+                  onToggle={toggleBatches}
+                  kind="number"
+                  align="right"
+                  compact
+                />
               </tr>
             </thead>
             <tbody>
@@ -722,7 +1032,7 @@ export function ReimburseReportClient({
                   </td>
                 </tr>
               ) : (
-                batches.map(b => (
+                sortedBatches.map(b => (
                   <tr key={b.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                     <td style={{ padding: '8px 6px', fontWeight: '500' }}>{b.batch_no}</td>
                     <td style={{ padding: '8px 6px' }}>{b.batch_date}</td>

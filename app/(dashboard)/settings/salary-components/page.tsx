@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { SalaryComponentsSettingsClient } from './salary-components-settings-client'
 
 export const metadata = { title: 'Master komponen gaji | Exrok' }
@@ -11,8 +12,8 @@ export default async function SalaryComponentsSettingsPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) {
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) {
     redirect('/expenses')
   }
 

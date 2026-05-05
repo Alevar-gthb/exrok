@@ -1,4 +1,5 @@
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { redirect, notFound } from 'next/navigation'
 import { ExpenseDetailClient } from '@/components/expense-detail-client'
 
@@ -11,18 +12,17 @@ export default async function ExpenseDetailPage({ params }: { params: { id: stri
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [{ data: me }, { data: expense, error }, { data: approvals }] = await Promise.all([
-    supabase
-      .from('employees')
-      .select('id, role')
-      .eq('email', user.email ?? '')
-      .single(),
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me) redirect('/login')
+
+  const [{ data: expense, error }, { data: approvals }] = await Promise.all([
     supabase
       .from('expenses')
       .select(
         `
         id,
         ref_no,
+        submission_date,
         transaction_date,
         type,
         description,
@@ -67,7 +67,6 @@ export default async function ExpenseDetailPage({ params }: { params: { id: stri
       .order('created_at', { ascending: true }),
   ])
 
-  if (!me) redirect('/login')
   if (error || !expense) notFound()
 
   return (

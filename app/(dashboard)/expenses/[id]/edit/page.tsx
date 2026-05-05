@@ -32,6 +32,7 @@ export default async function EditExpensePage({ params }: { params: { id: string
   const row = expense as Expense
 
   const initialValues: Partial<ExpenseFormValues> = {
+    submission_date: expense.submission_date,
     transaction_date: expense.transaction_date,
     type: expense.type as ExpenseFormValues['type'],
     description: expense.description ?? '',

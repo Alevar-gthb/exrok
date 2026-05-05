@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
 import { EmployeesListClient, type EmployeeListRow } from './employees-list-client'
 import { summarizeCompensationRows } from '@/lib/compensation-summary'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 
 export const metadata = { title: 'Karyawan | Exrok' }
 
@@ -12,8 +13,10 @@ export default async function EmployeesPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) {
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me) redirect('/login')
+
+  if (!me.role || !['owner', 'finance'].includes(me.role)) {
     redirect('/expenses')
   }
 

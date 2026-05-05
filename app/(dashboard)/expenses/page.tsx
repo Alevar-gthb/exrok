@@ -24,7 +24,7 @@ export default async function ExpensesPage({
   let query = supabase
     .from('expenses')
     .select(`
-      id, ref_no, transaction_date, type, description,
+      id, ref_no, submission_date, transaction_date, type, description,
       amount, vat, admin_fee, service_fee, total_payment,
       status, is_reconciled, created_at, created_by,
       project:projects(id, name),

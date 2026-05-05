@@ -1,12 +1,20 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useCallback, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { formatIDR } from '@/lib/decimal'
 import { EXPENSE_STATUS_STYLE } from '@/lib/expense-status-styles'
 import { rpcProcessApproval, rpcSubmitExpense } from '@/lib/actions/approval.actions'
 import { markExpensePaid, uploadExpensePaymentProof } from '@/lib/actions/expense.actions'
+import { SortableTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 type ApprovalRow = {
   id: string
@@ -22,6 +30,7 @@ type ApprovalRow = {
 type ExpenseDetail = {
   id: string
   ref_no: string | null
+  submission_date: string
   transaction_date: string
   type: string
   description: string | null
@@ -103,6 +112,34 @@ export function ExpenseDetailClient({
   const [markPaidFile, setMarkPaidFile] = useState<File | null>(null)
   const [markPaidFileName, setMarkPaidFileName] = useState<string | null>(null)
   const [markPaidModalError, setMarkPaidModalError] = useState<string | null>(null)
+  const [breakdownSort, setBreakdownSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  const breakdownLines = useMemo(
+    () => [
+      { key: 'amount', label: 'Amount', value: expense.amount },
+      { key: 'vat', label: 'VAT', value: expense.vat },
+      { key: 'admin_fee', label: 'Admin Fee', value: expense.admin_fee },
+      { key: 'service_fee', label: 'Service Fee', value: expense.service_fee },
+    ],
+    [expense.amount, expense.vat, expense.admin_fee, expense.service_fee],
+  )
+
+  const sortedBreakdownLines = useMemo(() => {
+    const k = breakdownSort.key
+    if (!k) return breakdownLines
+    const dir = breakdownSort.dir
+    const copy = [...breakdownLines]
+    if (k === 'label') copy.sort((a, b) => compareText(a.label, b.label, dir))
+    else if (k === 'value')
+      copy.sort((a, b) =>
+        compareNum(parseDecimalString(a.value), parseDecimalString(b.value), dir),
+      )
+    return copy
+  }, [breakdownLines, breakdownSort])
+
+  const toggleBreakdownSort = useCallback((key: string) => {
+    setBreakdownSort(s => cycleColumnSort(s, key))
+  }, [])
 
   const isCreator = expense.created_by === userId
   const canFinance = ['owner', 'finance'].includes(userRole)
@@ -283,6 +320,10 @@ export function ExpenseDetailClient({
               <div style={val}>{expense.payment_method ?? '—'}</div>
             </div>
             <div>
+              <div style={label}>Tanggal pengajuan</div>
+              <div style={val}>{new Date(expense.submission_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+            </div>
+            <div>
               <div style={label}>Tanggal transaksi</div>
               <div style={val}>{new Date(expense.transaction_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
             </div>
@@ -300,16 +341,34 @@ export function ExpenseDetailClient({
         <div style={{ ...card, marginBottom: 0 }}>
           <h2 style={{ fontSize: '13px', fontWeight: '600', color: '#0F172A', margin: '0 0 12px' }}>Breakdown biaya</h2>
           <table style={{ width: '100%', fontSize: '13px', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #F1F5F9' }}>
+                <SortableTh
+                  label="Komponen"
+                  columnKey="label"
+                  activeKey={breakdownSort.key}
+                  direction={breakdownSort.dir}
+                  onToggle={toggleBreakdownSort}
+                  kind="text"
+                />
+                <SortableTh
+                  label="Nilai"
+                  columnKey="value"
+                  activeKey={breakdownSort.key}
+                  direction={breakdownSort.dir}
+                  onToggle={toggleBreakdownSort}
+                  kind="number"
+                  align="right"
+                />
+              </tr>
+            </thead>
             <tbody>
-              {[
-                ['Amount', expense.amount],
-                ['VAT', expense.vat],
-                ['Admin Fee', expense.admin_fee],
-                ['Service Fee', expense.service_fee],
-              ].map(([k, v]) => (
-                <tr key={String(k)}>
-                  <td style={{ padding: '6px 0', color: '#64748B' }}>{k}</td>
-                  <td style={{ padding: '6px 0', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatIDR(v)}</td>
+              {sortedBreakdownLines.map(row => (
+                <tr key={row.key}>
+                  <td style={{ padding: '6px 0', color: '#64748B' }}>{row.label}</td>
+                  <td style={{ padding: '6px 0', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatIDR(row.value)}
+                  </td>
                 </tr>
               ))}
               <tr>

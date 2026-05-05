@@ -1,5 +1,6 @@
 // app/(dashboard)/reports/reimburse/page.tsx
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { redirect } from 'next/navigation'
 import {
   ReimburseReportClient,
@@ -42,13 +43,9 @@ export default async function ReimburseReportPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase
-    .from('employees')
-    .select('role')
-    .eq('email', user.email ?? '')
-    .single()
+  const me = await fetchMySessionEmployee(supabase)
 
-  if (!me || !['owner', 'finance'].includes(me.role)) {
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) {
     redirect('/expenses')
   }
 

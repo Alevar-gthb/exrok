@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
+import { useCrudTableSort } from '@/lib/crud-table-sort'
+import { compareText } from '@/lib/table-sort'
 
 type UserRow = {
   id: string
@@ -16,6 +18,29 @@ type UserRow = {
 export function UsersSettingsClient({ initialRows }: { initialRows: UserRow[] }) {
   const supabase = createClient()
   const [data, setData] = useState<UserRow[]>(initialRows)
+  const { tableSort, sortProp } = useCrudTableSort()
+
+  const sortedData = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return data
+    const dir = tableSort.dir
+    const copy = [...data]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'full_name':
+          return compareText(a.full_name, b.full_name, dir)
+        case 'email':
+          return compareText(a.email, b.email, dir)
+        case 'role':
+          return compareText(a.role, b.role, dir)
+        case 'status':
+          return compareText(a.status, b.status, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [data, tableSort])
 
   async function load() {
     const { data: d } = await supabase
@@ -69,7 +94,8 @@ export function UsersSettingsClient({ initialRows }: { initialRows: UserRow[] })
   return (
     <CrudTable
       title="User & role"
-      data={data}
+      data={sortedData}
+      sort={sortProp}
       deleteDisabled={row => row.status === 'Active'}
       fields={[
         { key: 'full_name', label: 'Nama Lengkap', required: true, placeholder: 'Budi Santoso' },
@@ -78,11 +104,12 @@ export function UsersSettingsClient({ initialRows }: { initialRows: UserRow[] })
         { key: 'status', label: 'Status', type: 'select', options: ['Active', 'Inactive'] },
       ]}
       displayCols={[
-        { key: 'full_name', label: 'Nama' },
-        { key: 'email', label: 'Email' },
+        { key: 'full_name', label: 'Nama', sortable: 'text' },
+        { key: 'email', label: 'Email', sortable: 'text' },
         {
           key: 'role',
           label: 'Role',
+          sortable: 'text',
           render: row => {
             const s = ROLE_COLOR[row.role] ?? ROLE_COLOR.staff
             return (
@@ -104,6 +131,7 @@ export function UsersSettingsClient({ initialRows }: { initialRows: UserRow[] })
         {
           key: 'status',
           label: 'Status',
+          sortable: 'text',
           render: row => (
             <span
               style={{

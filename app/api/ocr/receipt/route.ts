@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { RECEIPT_OCR_PROMPT, parseOcrResponse } from '@/lib/ocr/receipt-parser'
 import { OcrApiResponse } from '@/types/ocr'
 
@@ -128,18 +129,12 @@ export async function POST(req: NextRequest): Promise<NextResponse<OcrApiRespons
 
     const result = parseOcrResponse(rawText)
 
-    if (user.email) {
-      const { data: employee } = await supabase
-        .from('employees')
-        .select('id')
-        .eq('email', user.email)
-        .maybeSingle()
-
-      if (employee?.id) {
+    const sessionEmp = await fetchMySessionEmployee(supabase)
+    if (sessionEmp?.id) {
         void supabase
           .from('ocr_audit_logs')
           .insert({
-            user_id: employee.id,
+            user_id: sessionEmp.id,
             vendor_detected: result.vendor_name,
             amount_detected: result.total_amount,
             confidence_score: result.confidence_score,
@@ -147,7 +142,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<OcrApiRespons
           .then(({ error }) => {
             if (error) console.error('ocr_audit_logs insert:', error.message)
           })
-      }
     }
 
     return NextResponse.json({ success: true, data: result })

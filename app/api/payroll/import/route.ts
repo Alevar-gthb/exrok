@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { importPayrollWorkbook } from '@/lib/payroll-import/importer'
 import type { PayrollImportMode } from '@/types/payroll-import'
 
@@ -12,8 +13,8 @@ export async function POST(req: NextRequest) {
 
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
 
-    const { data: me } = await supabase.from('employees').select('id, role').eq('email', user.email ?? '').maybeSingle()
-    if (!me || !['owner', 'finance'].includes(me.role)) {
+    const me = await fetchMySessionEmployee(supabase)
+    if (!me?.role || !['owner', 'finance'].includes(me.role)) {
       return NextResponse.json({ success: false, error: 'Role tidak diizinkan.' }, { status: 403 })
     }
 

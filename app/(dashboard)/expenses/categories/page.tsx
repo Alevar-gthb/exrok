@@ -1,13 +1,47 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
+import { useCrudTableSort } from '@/lib/crud-table-sort'
+import { compareText } from '@/lib/table-sort'
 
 export default function CategoriesPage() {
   const supabase = createClient()
   const [cats, setCats] = useState<any[]>([])
   const [subcats, setSubcats] = useState<any[]>([])
   const [selectedCat, setSelectedCat] = useState<string | null>(null)
+  const { tableSort: catSort, sortProp: catSortProp } = useCrudTableSort()
+  const { tableSort: subSort, sortProp: subSortProp } = useCrudTableSort()
+
+  const sortedCats = useMemo(() => {
+    const key = catSort.key
+    if (!key) return cats
+    const dir = catSort.dir
+    const copy = [...cats]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'name':
+          return compareText(a.name, b.name, dir)
+        case 'code':
+          return compareText(a.code, b.code, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [cats, catSort])
+
+  const sortedSubcats = useMemo(() => {
+    const key = subSort.key
+    if (!key) return subcats
+    const dir = subSort.dir
+    const copy = [...subcats]
+    copy.sort((a, b) => {
+      if (key === 'name') return compareText(a.name, b.name, dir)
+      return 0
+    })
+    return copy
+  }, [subcats, subSort])
 
   async function loadCats() {
     const { data } = await supabase.from('expense_categories').select('*').order('name')
@@ -57,18 +91,19 @@ export default function CategoriesPage() {
       <div style={{ flex: '1', minWidth: '280px' }}>
         <CrudTable
           title="Kategori"
-          data={cats}
+          data={sortedCats}
+          sort={catSortProp}
           fields={[
             { key: 'name', label: 'Nama Kategori', required: true, placeholder: 'Operational Costs' },
             { key: 'code', label: 'Kode', placeholder: 'OperationalCosts' },
           ]}
           displayCols={[
-            { key: 'name', label: 'Kategori', render: row => (
+            { key: 'name', label: 'Kategori', sortable: 'text', render: row => (
               <button onClick={() => setSelectedCat(row.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: selectedCat === row.id ? '600' : '400', color: selectedCat === row.id ? '#0F172A' : '#334155', textAlign: 'left', padding: 0 }}>
                 {row.name} {selectedCat === row.id ? '→' : ''}
               </button>
             )},
-            { key: 'code', label: 'Kode' },
+            { key: 'code', label: 'Kode', sortable: 'text' },
           ]}
           onSave={onSaveCat}
           onDelete={onDeleteCat}
@@ -80,9 +115,10 @@ export default function CategoriesPage() {
         {selectedCat ? (
           <CrudTable
             title={`Subkategori — ${selectedCatName}`}
-            data={subcats}
+            data={sortedSubcats}
+            sort={subSortProp}
             fields={[{ key: 'name', label: 'Nama Subkategori', required: true, placeholder: 'Office Supplies' }]}
-            displayCols={[{ key: 'name', label: 'Subkategori' }]}
+            displayCols={[{ key: 'name', label: 'Subkategori', sortable: 'text' }]}
             onSave={onSaveSubcat}
             onDelete={onDeleteSubcat}
           />

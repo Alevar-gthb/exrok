@@ -1,4 +1,5 @@
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { redirect } from 'next/navigation'
 import { ApprovalRulesClient } from '@/components/approval-rules-client'
 
@@ -11,7 +12,7 @@ export default async function ApprovalRulesPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
+  const me = await fetchMySessionEmployee(supabase)
 
   if (me?.role !== 'owner') {
     redirect('/expenses')

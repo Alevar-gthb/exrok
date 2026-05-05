@@ -3,8 +3,10 @@ import type { CSSProperties } from 'react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { formatIDR } from '@/lib/decimal'
 import { payrollLineReportAmounts } from '@/lib/reports/payroll-line-metrics'
+import { PayrollReportLinesTable } from '@/components/payroll-report-lines-table'
 import type { PayrollRun, PayrollRunLine } from '@/types/database.types'
 
 export const metadata = { title: 'Laporan gaji | Exrok' }
@@ -22,8 +24,8 @@ export default async function PayrollReportPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
 
   const now = new Date()
   const y = parseInt(String(searchParams.year ?? now.getFullYear()), 10)
@@ -172,38 +174,7 @@ export default async function PayrollReportPage({
             </div>
           </div>
 
-          <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-              <thead>
-                <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569' }}>
-                  <th style={{ textAlign: 'left', padding: '12px 16px', fontWeight: '600' }}>Karyawan</th>
-                  <th style={{ textAlign: 'right', padding: '12px 16px', fontWeight: '600' }}>Bruto</th>
-                  <th style={{ textAlign: 'right', padding: '12px 16px', fontWeight: '600' }}>Pemotongan</th>
-                  <th style={{ textAlign: 'right', padding: '12px 16px', fontWeight: '600' }}>Nett</th>
-                  <th style={{ textAlign: 'left', padding: '12px 16px', fontWeight: '600' }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.map(({ line: l, gross, deductions, nett }) => (
-                  <tr key={l.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                    <td style={{ padding: '12px 16px', fontWeight: '500', color: '#0F172A' }}>{l.employee?.full_name ?? '—'}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatIDR(gross)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatIDR(deductions)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: '600' }}>{formatIDR(nett)}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      {l.expense_id ? (
-                        <Link href={`/expenses/${l.expense_id}`} style={{ fontSize: '12px', color: '#2563EB', textDecoration: 'none' }}>
-                          Expense
-                        </Link>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <PayrollReportLinesTable detail={detail} />
         </>
       )}
     </div>

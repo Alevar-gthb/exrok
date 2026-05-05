@@ -5,15 +5,24 @@
 // Tabel expense dengan filter, status badge, submit draft (legacy Draft)
 // ============================================================
 
-import { useState, useTransition } from 'react'
+import { useCallback, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatIDR } from '@/lib/decimal'
 import { EXPENSE_STATUS_STYLE } from '@/lib/expense-status-styles'
 import { rpcSubmitExpense } from '@/lib/actions/approval.actions'
+import { SortableTh, StaticTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 interface ExpenseRow {
   id: string
   ref_no: string | null
+  submission_date: string
   transaction_date: string
   type: string
   description: string | null
@@ -75,19 +84,59 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
   // Filter state
   const [filterStatus, setFilterStatus] = useState('')
   const [filterProject, setFilterProject] = useState('')
-  const [filterFrom, setFilterFrom] = useState('')
-  const [filterTo, setFilterTo] = useState('')
+  const [filterSubmissionFrom, setFilterSubmissionFrom] = useState('')
+  const [filterSubmissionTo, setFilterSubmissionTo] = useState('')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  const toggleSortColumn = useCallback((key: string) => {
+    setTableSort(s => cycleColumnSort(s, key))
+  }, [])
 
   // Filter client-side
   const filtered = expenses.filter(e => {
     if (filterStatus && e.status !== filterStatus) return false
     if (filterProject && e.project?.id !== filterProject) return false
-    if (filterFrom && e.transaction_date < filterFrom) return false
-    if (filterTo && e.transaction_date > filterTo) return false
+    if (filterSubmissionFrom && e.submission_date < filterSubmissionFrom) return false
+    if (filterSubmissionTo && e.submission_date > filterSubmissionTo) return false
     return true
   })
+
+  const sortedFiltered = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return filtered
+    const dir = tableSort.dir
+    const copy = [...filtered]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'submission_date':
+          return compareText(a.submission_date, b.submission_date, dir)
+        case 'transaction_date':
+          return compareText(a.transaction_date, b.transaction_date, dir)
+        case 'ref_desc': {
+          const ta = `${a.ref_no ?? ''} ${a.description ?? ''} ${a.employee?.full_name ?? ''}`
+          const tb = `${b.ref_no ?? ''} ${b.description ?? ''} ${b.employee?.full_name ?? ''}`
+          return compareText(ta, tb, dir)
+        }
+        case 'type':
+          return compareText(a.type, b.type, dir)
+        case 'project':
+          return compareText(a.project?.name, b.project?.name, dir)
+        case 'total':
+          return compareNum(
+            parseDecimalString(a.total_payment),
+            parseDecimalString(b.total_payment),
+            dir,
+          )
+        case 'status':
+          return compareText(a.status, b.status, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [filtered, tableSort])
 
   async function handleSubmitExpense(id: string) {
     setActionLoading(id)
@@ -127,12 +176,31 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
           ))}
         </select>
 
-        <input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} style={inputStyle} placeholder="Dari" />
-        <input type="date" value={filterTo}   onChange={e => setFilterTo(e.target.value)}   style={inputStyle} placeholder="Sampai" />
+        <input
+          type="date"
+          value={filterSubmissionFrom}
+          onChange={e => setFilterSubmissionFrom(e.target.value)}
+          style={inputStyle}
+          title="Tanggal pengajuan dari"
+          aria-label="Tanggal pengajuan dari"
+        />
+        <input
+          type="date"
+          value={filterSubmissionTo}
+          onChange={e => setFilterSubmissionTo(e.target.value)}
+          style={inputStyle}
+          title="Tanggal pengajuan sampai"
+          aria-label="Tanggal pengajuan sampai"
+        />
 
-        {(filterStatus || filterProject || filterFrom || filterTo) && (
+        {(filterStatus || filterProject || filterSubmissionFrom || filterSubmissionTo) && (
           <button
-            onClick={() => { setFilterStatus(''); setFilterProject(''); setFilterFrom(''); setFilterTo('') }}
+            onClick={() => {
+              setFilterStatus('')
+              setFilterProject('')
+              setFilterSubmissionFrom('')
+              setFilterSubmissionTo('')
+            }}
             style={{ ...inputStyle, cursor: 'pointer', color: '#EF4444', borderColor: '#FECACA', background: '#FEF2F2' }}
           >
             × Reset
@@ -140,7 +208,7 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
         )}
 
         <span style={{ marginLeft: 'auto', fontSize: '12px', color: '#94A3B8' }}>
-          {filtered.length} dari {expenses.length} data
+          {sortedFiltered.length} dari {expenses.length} data
         </span>
       </div>
 
@@ -153,7 +221,7 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
 
       {/* Table */}
       <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden' }}>
-        {filtered.length === 0 ? (
+        {sortedFiltered.length === 0 ? (
           <div style={{ padding: '48px', textAlign: 'center', color: '#94A3B8', fontSize: '14px' }}>
             Tidak ada data expense
           </div>
@@ -162,17 +230,67 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                  {['Tanggal transaksi', 'Ref / Deskripsi', 'Tipe', 'Proyek', 'Total', 'Status', 'Aksi'].map(h => (
-                    <th key={h} style={{
-                      padding: '10px 14px', textAlign: 'left',
-                      fontSize: '11px', fontWeight: '600', color: '#475569',
-                      letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap',
-                    }}>{h}</th>
-                  ))}
+                  <SortableTh
+                    label="Tanggal pengajuan"
+                    columnKey="submission_date"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Tanggal transaksi"
+                    columnKey="transaction_date"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Ref / Deskripsi"
+                    columnKey="ref_desc"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Tipe"
+                    columnKey="type"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Proyek"
+                    columnKey="project"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Total"
+                    columnKey="total"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="number"
+                  />
+                  <SortableTh
+                    label="Status"
+                    columnKey="status"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <StaticTh>Aksi</StaticTh>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row, i) => (
+                {sortedFiltered.map((row, i) => (
                   <tr
                     key={row.id}
                     role="button"
@@ -182,7 +300,7 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
                     }}
                     onClick={() => router.push(`/expenses/${row.id}`)}
                     style={{
-                      borderBottom: i < filtered.length - 1 ? '1px solid #F1F5F9' : 'none',
+                      borderBottom: i < sortedFiltered.length - 1 ? '1px solid #F1F5F9' : 'none',
                       background: actionLoading === row.id ? '#FAFAFA' : '#fff',
                       transition: 'background .1s',
                       cursor: 'pointer',
@@ -190,6 +308,11 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
                     onMouseEnter={e => { if (actionLoading !== row.id) (e.currentTarget as HTMLElement).style.background = '#FAFAFA' }}
                     onMouseLeave={e => { if (actionLoading !== row.id) (e.currentTarget as HTMLElement).style.background = '#fff' }}
                   >
+                    {/* Tanggal Pengajuan */}
+                    <td style={{ padding: '11px 14px', whiteSpace: 'nowrap', color: '#475569' }}>
+                      {new Date(row.submission_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+
                     {/* Tanggal */}
                     <td style={{ padding: '11px 14px', whiteSpace: 'nowrap', color: '#475569' }}>
                       {new Date(row.transaction_date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}

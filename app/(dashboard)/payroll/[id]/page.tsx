@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { PayrollRunDetailClient, type PayrollLineRow } from '@/components/payroll-run-detail-client'
 import type { PayrollRun } from '@/types/database.types'
 
@@ -12,8 +13,8 @@ export default async function PayrollRunPage({ params }: { params: { id: string 
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) {
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) {
     redirect('/expenses')
   }
 

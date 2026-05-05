@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
@@ -12,6 +12,14 @@ import {
 import { parsePayrollAdjustments } from '@/lib/payroll-helpers'
 import { formatIDR } from '@/lib/decimal'
 import type { PayrollLineAdjustment, PayrollRun, PayrollRunLine, Project } from '@/types/database.types'
+import { SortableTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 export type PayrollLineRow = PayrollRunLine & {
   employee?: { full_name: string } | null
@@ -57,6 +65,41 @@ export function PayrollRunDetailClient({
       })),
     [initialLines]
   )
+
+  const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+  const toggleSort = useCallback((key: string) => {
+    setTableSort(s => cycleColumnSort(s, key))
+  }, [])
+
+  const sortedLines = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return lines
+    const dir = tableSort.dir
+    const copy = [...lines]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'employee':
+          return compareText(a.employee?.full_name, b.employee?.full_name, dir)
+        case 'project': {
+          const na = a.project_id ? projects.find(p => p.id === a.project_id)?.name ?? a.project_id : ''
+          const nb = b.project_id ? projects.find(p => p.id === b.project_id)?.name ?? b.project_id : ''
+          return compareText(na, nb, dir)
+        }
+        case 'net':
+          return compareNum(parseDecimalString(a.amount), parseDecimalString(b.amount), dir)
+        case 'pph21': {
+          const pa = parseDecimalString(a.pph21_excel ?? a.pph21_system ?? undefined)
+          const pb = parseDecimalString(b.pph21_excel ?? b.pph21_system ?? undefined)
+          return compareNum(pa, pb, dir)
+        }
+        case 'expense':
+          return compareText(a.expense_id ?? '', b.expense_id ?? '', dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [lines, tableSort, projects])
 
   const periodLabel = `${String(initialRun.period_month).padStart(2, '0')}/${initialRun.period_year}`
 
@@ -198,15 +241,52 @@ export function PayrollRunDetailClient({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                <th style={{ textAlign: 'left', padding: '10px 14px', color: '#475569' }}>Karyawan</th>
-                <th style={{ textAlign: 'left', padding: '10px 14px', color: '#475569' }}>Proyek</th>
-                <th style={{ textAlign: 'right', padding: '10px 14px', color: '#475569' }}>Net</th>
-                <th style={{ textAlign: 'right', padding: '10px 14px', color: '#475569' }}>PPh21 (Excel/System)</th>
-                <th style={{ textAlign: 'left', padding: '10px 14px', color: '#475569' }}>Expense</th>
+                <SortableTh
+                  label="Karyawan"
+                  columnKey="employee"
+                  activeKey={tableSort.key}
+                  direction={tableSort.dir}
+                  onToggle={toggleSort}
+                  kind="text"
+                />
+                <SortableTh
+                  label="Proyek"
+                  columnKey="project"
+                  activeKey={tableSort.key}
+                  direction={tableSort.dir}
+                  onToggle={toggleSort}
+                  kind="text"
+                />
+                <SortableTh
+                  label="Net"
+                  columnKey="net"
+                  activeKey={tableSort.key}
+                  direction={tableSort.dir}
+                  onToggle={toggleSort}
+                  kind="number"
+                  align="right"
+                />
+                <SortableTh
+                  label="PPh21 (Excel/System)"
+                  columnKey="pph21"
+                  activeKey={tableSort.key}
+                  direction={tableSort.dir}
+                  onToggle={toggleSort}
+                  kind="number"
+                  align="right"
+                />
+                <SortableTh
+                  label="Expense"
+                  columnKey="expense"
+                  activeKey={tableSort.key}
+                  direction={tableSort.dir}
+                  onToggle={toggleSort}
+                  kind="text"
+                />
               </tr>
             </thead>
             <tbody>
-              {lines.map(line => (
+              {sortedLines.map(line => (
                 <tr key={line.id} style={{ borderBottom: '1px solid #F1F5F9', verticalAlign: 'top' }}>
                   <td style={{ padding: '12px 14px' }}>
                     <div style={{ fontWeight: '500', color: '#0F172A' }}>{line.employee?.full_name ?? '—'}</div>

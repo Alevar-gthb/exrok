@@ -6,6 +6,7 @@ import type { ActionResult } from '@/lib/actions/expense.actions'
 import { insertExpense } from '@/lib/actions/expense.actions'
 import { netFromAdjustments, parsePayrollAdjustments } from '@/lib/payroll-helpers'
 import { insertPayrollRunForPeriod } from '@/lib/payroll-run-insert'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import type { PayrollLineAdjustment } from '@/types/database.types'
 
 async function assertPayrollRole(
@@ -15,8 +16,8 @@ async function assertPayrollRole(
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Unauthorized' }
-  const { data: emp } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!emp || !['owner', 'finance'].includes(emp.role)) {
+  const emp = await fetchMySessionEmployee(supabase)
+  if (!emp?.role || !['owner', 'finance'].includes(emp.role)) {
     return { ok: false, error: 'Hanya owner atau finance yang dapat mengelola payroll.' }
   }
   return { ok: true, user }
@@ -108,6 +109,7 @@ export async function submitPayrollRun(runId: string): Promise<ActionResult<{ ex
   const y = run.period_year
   const m = run.period_month
   const transactionDate = `${y}-${String(m).padStart(2, '0')}-25`
+  const submissionDate = new Date().toISOString().split('T')[0]
   const label = `${String(m).padStart(2, '0')}/${y}`
 
   let count = 0
@@ -116,6 +118,7 @@ export async function submitPayrollRun(runId: string): Promise<ActionResult<{ ex
     const desc = `Gaji ${name} - ${label}`
     const ins = await insertExpense({
       ref_no: null,
+      submission_date: submissionDate,
       transaction_date: transactionDate,
       type: 'Salary',
       description: desc,

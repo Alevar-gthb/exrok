@@ -1,5 +1,6 @@
 // app/(dashboard)/reports/page.tsx
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { ExportButton } from '@/components/export-button'
@@ -22,8 +23,8 @@ export default async function ReportsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: me } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
-  if (!me || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
+  const me = await fetchMySessionEmployee(supabase)
+  if (!me?.role || !['owner', 'finance'].includes(me.role)) redirect('/expenses')
 
   const { data: expenses } = await supabase
     .from('expenses')

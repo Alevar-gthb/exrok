@@ -1,7 +1,15 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import { createClient } from '@/supabase/client'
+import { SortableTh } from '@/components/sortable-th'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 
 const S = {
   inp: { width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid #E2E8F0', borderRadius: '8px', outline: 'none', color: '#0F172A', background: '#fff', fontFamily: 'inherit' } as React.CSSProperties,
@@ -26,6 +34,11 @@ export default function InventoryPage() {
   const [tab, setTab] = useState<'all' | 'Asset' | 'Consumable'>('all')
   const [form, setForm] = useState({ kode_barang: '', name: '', type: 'Asset', location: '', condition: 'Baik', purchase_price: '', serial_number: '', initial_stock: '', last_stock: '' })
   const [error, setError] = useState<string | null>(null)
+  const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  const toggleSortColumn = useCallback((key: string) => {
+    setTableSort(s => cycleColumnSort(s, key))
+  }, [])
 
   async function load() {
     setLoading(true)
@@ -51,6 +64,43 @@ export default function InventoryPage() {
   }
 
   const displayed = tab === 'all' ? items : items.filter(i => i.type === tab)
+
+  function stockSortValue(it: Item): number {
+    if (it.type === 'Consumable' && it.initial_stock != null) return it.last_stock ?? 0
+    return -1
+  }
+
+  const sortedDisplayed = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return displayed
+    const dir = tableSort.dir
+    const copy = [...displayed]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'kode_barang':
+          return compareText(a.kode_barang, b.kode_barang, dir)
+        case 'name':
+          return compareText(a.name, b.name, dir)
+        case 'type':
+          return compareText(a.type, b.type, dir)
+        case 'location':
+          return compareText(a.location, b.location, dir)
+        case 'condition':
+          return compareText(a.condition, b.condition, dir)
+        case 'stock':
+          return compareNum(stockSortValue(a), stockSortValue(b), dir)
+        case 'purchase_price':
+          return compareNum(
+            parseDecimalString(a.purchase_price),
+            parseDecimalString(b.purchase_price),
+            dir,
+          )
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [displayed, tableSort])
 
   const TYPE_S: Record<string, { bg: string; color: string }> = {
     Asset: { bg: '#EFF6FF', color: '#1D4ED8' },
@@ -153,7 +203,7 @@ export default function InventoryPage() {
       <div style={{ background: '#fff', border: '1px solid #E2E8F0', borderRadius: '12px', overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '48px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>Memuat...</div>
-        ) : displayed.length === 0 ? (
+        ) : sortedDisplayed.length === 0 ? (
           <div style={{ padding: '64px', textAlign: 'center' }}>
             <div style={{ fontSize: '32px', marginBottom: '12px' }}>📦</div>
             <p style={{ fontSize: '14px', fontWeight: '500', color: '#334155', margin: '0 0 4px' }}>Belum ada item inventaris</p>
@@ -166,16 +216,69 @@ export default function InventoryPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                  {['Kode', 'Nama', 'Tipe', 'Lokasi', 'Kondisi', 'Stok', 'Harga Beli'].map(h => (
-                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#475569', letterSpacing: '.04em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
+                  <SortableTh
+                    label="Kode"
+                    columnKey="kode_barang"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Nama"
+                    columnKey="name"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Tipe"
+                    columnKey="type"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Lokasi"
+                    columnKey="location"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Kondisi"
+                    columnKey="condition"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="text"
+                  />
+                  <SortableTh
+                    label="Stok"
+                    columnKey="stock"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="number"
+                  />
+                  <SortableTh
+                    label="Harga Beli"
+                    columnKey="purchase_price"
+                    activeKey={tableSort.key}
+                    direction={tableSort.dir}
+                    onToggle={toggleSortColumn}
+                    kind="number"
+                  />
                 </tr>
               </thead>
               <tbody>
-                {displayed.map((item, i) => {
+                {sortedDisplayed.map((item, i) => {
                   const ts = TYPE_S[item.type] ?? TYPE_S.Asset
                   return (
-                    <tr key={item.id} style={{ borderBottom: i < displayed.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
+                    <tr key={item.id} style={{ borderBottom: i < sortedDisplayed.length - 1 ? '1px solid #F1F5F9' : 'none' }}>
                       <td style={{ padding: '11px 14px', fontFamily: 'monospace', fontSize: '12px', color: '#64748B' }}>{item.kode_barang ?? '—'}</td>
                       <td style={{ padding: '11px 14px' }}>
                         <div style={{ fontWeight: '500', color: '#0F172A' }}>{item.name}</div>

@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import type { ActionResult } from '@/lib/actions/expense.actions'
 
 export interface CreateReimbursementBatchResult {
@@ -21,13 +22,9 @@ export async function createReimbursementBatch(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
 
-  const { data: emp } = await supabase
-    .from('employees')
-    .select('role')
-    .eq('email', user.email ?? '')
-    .single()
+  const emp = await fetchMySessionEmployee(supabase)
 
-  if (!emp || !['owner', 'finance'].includes(emp.role)) {
+  if (!emp?.role || !['owner', 'finance'].includes(emp.role)) {
     return { success: false, error: 'Hanya owner atau finance yang dapat memproses batch.' }
   }
 

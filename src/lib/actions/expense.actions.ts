@@ -5,6 +5,7 @@
 'use server'
 
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import type { ExpenseInsert } from '@/types/database.types'
 
 // ─── Type untuk hasil action ─────────────────────────────────
@@ -15,8 +16,47 @@ export interface ActionResult<T = null> {
   error?: string
 }
 
+export interface CreateVendorInput {
+  name: string
+  type?: string | null
+  contact?: string | null
+  notes?: string | null
+}
+
 const EXPENSE_FILE_MAX_BYTES = 2 * 1024 * 1024
 const EXPENSE_FILE_TYPES = ['image/jpeg', 'image/png', 'application/pdf'] as const
+
+export async function createExpenseVendor(input: CreateVendorInput): Promise<ActionResult<{ id: string; name: string }>> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Unauthorized' }
+
+  const name = input.name.trim()
+  if (name.length < 2) {
+    return { success: false, error: 'Nama vendor minimal 2 karakter' }
+  }
+
+  const payload = {
+    name,
+    type: input.type?.trim() ? input.type.trim() : null,
+    contact: input.contact?.trim() ? input.contact.trim() : null,
+    notes: input.notes?.trim() ? input.notes.trim() : null,
+  }
+
+  const { data, error } = await supabase
+    .from('vendors')
+    .insert(payload)
+    .select('id, name')
+    .single()
+
+  if (error || !data) {
+    return { success: false, error: error?.message ?? 'Gagal membuat vendor baru' }
+  }
+
+  return { success: true, data }
+}
 
 function parseSubmitExpenseRpc(data: unknown): { ok: true; status: string; message: string } | { ok: false; error: string } {
   const row = data as { success?: boolean; message?: string; status?: string }
@@ -198,12 +238,8 @@ export async function uploadExpensePaymentProof(
   } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
 
-  const { data: emp } = await supabase
-    .from('employees')
-    .select('role')
-    .eq('email', user.email ?? '')
-    .single()
-  if (!emp || !['owner', 'finance'].includes(emp.role)) {
+  const emp = await fetchMySessionEmployee(supabase)
+  if (!emp?.role || !['owner', 'finance'].includes(emp.role)) {
     return { success: false, error: 'Tidak memiliki akses untuk mengunggah bukti bayar.' }
   }
 
@@ -231,12 +267,8 @@ export async function markExpensePaid(input: {
   } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
 
-  const { data: emp } = await supabase
-    .from('employees')
-    .select('role')
-    .eq('email', user.email ?? '')
-    .single()
-  if (!emp || !['owner', 'finance'].includes(emp.role)) {
+  const emp = await fetchMySessionEmployee(supabase)
+  if (!emp?.role || !['owner', 'finance'].includes(emp.role)) {
     return { success: false, error: 'Tidak memiliki akses untuk aksi ini.' }
   }
 
@@ -286,13 +318,9 @@ export async function updateExpenseStatus(
 
   // Hanya owner/finance boleh set status tertentu
   if (['Approved', 'Rejected'].includes(status)) {
-    const { data: emp } = await supabase
-      .from('employees')
-      .select('role')
-      .eq('email', user.email ?? '')
-      .single()
+    const emp = await fetchMySessionEmployee(supabase)
 
-    if (!emp || !['owner', 'finance'].includes(emp.role)) {
+    if (!emp?.role || !['owner', 'finance'].includes(emp.role)) {
       return { success: false, error: 'Tidak memiliki akses untuk aksi ini.' }
     }
   }

@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/supabase/server'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 import type { ActionResult } from '@/lib/actions/expense.actions'
 import type { ApprovalRuleInsert, ApprovalRuleUpdate } from '@/types/database.types'
 
@@ -8,7 +9,7 @@ async function requireOwner(): Promise<{ ok: true } | { ok: false; error: string
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: 'Unauthorized' }
-  const { data: emp } = await supabase.from('employees').select('role').eq('email', user.email ?? '').single()
+  const emp = await fetchMySessionEmployee(supabase)
   if (emp?.role !== 'owner') return { ok: false, error: 'Hanya owner yang dapat mengelola approval rules' }
   return { ok: true }
 }

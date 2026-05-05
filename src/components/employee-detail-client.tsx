@@ -5,6 +5,15 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
+import { SortableTh, StaticTh } from '@/components/sortable-th'
+import { useCrudTableSort } from '@/lib/crud-table-sort'
+import type { ColumnSortState } from '@/lib/table-sort'
+import {
+  compareNum,
+  compareText,
+  cycleColumnSort,
+  parseDecimalString,
+} from '@/lib/table-sort'
 import { formatIDR } from '@/lib/decimal'
 import { summarizeCompensationRows } from '@/lib/compensation-summary'
 import type {
@@ -116,6 +125,86 @@ export function EmployeeDetailClient({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editAmount, setEditAmount] = useState('')
   const [savingAmountId, setSavingAmountId] = useState<string | null>(null)
+  const [sortComp, setSortComp] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+  const [sortAssign, setSortAssign] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  const toggleSortComp = useCallback((k: string) => {
+    setSortComp(s => cycleColumnSort(s, k))
+  }, [])
+  const toggleSortAssign = useCallback((k: string) => {
+    setSortAssign(s => cycleColumnSort(s, k))
+  }, [])
+
+  const sortedAmountRows = useMemo(() => {
+    const key = sortComp.key
+    if (!key) return amountRows
+    const dir = sortComp.dir
+    const copy = [...amountRows]
+    copy.sort((a, b) => {
+      const ta = templateFromRow(a)
+      const tb = templateFromRow(b)
+      switch (key) {
+        case 'code':
+          return compareText(ta?.code, tb?.code, dir)
+        case 'label':
+          return compareText(ta?.label, tb?.label, dir)
+        case 'kind':
+          return compareText(ta?.kind, tb?.kind, dir)
+        case 'amount':
+          return compareNum(
+            parseDecimalString(String(a.amount)),
+            parseDecimalString(String(b.amount)),
+            dir,
+          )
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [amountRows, sortComp])
+
+  const sortedAssignments = useMemo(() => {
+    const key = sortAssign.key
+    if (!key) return assignments
+    const dir = sortAssign.dir
+    const copy = [...assignments]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'project':
+          return compareText(a.project?.name, b.project?.name, dir)
+        case 'is_primary':
+          return compareNum(a.is_primary ? 1 : 0, b.is_primary ? 1 : 0, dir)
+        case 'started_on':
+          return compareText(a.started_on, b.started_on, dir)
+        case 'ended_on':
+          return compareText(a.ended_on, b.ended_on, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [assignments, sortAssign])
+
+  const { tableSort: contractTableSort, sortProp: contractSortProp } = useCrudTableSort()
+  const sortedContracts = useMemo(() => {
+    const key = contractTableSort.key
+    if (!key) return contracts
+    const dir = contractTableSort.dir
+    const copy = [...contracts]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'start_date':
+          return compareText(String(a.start_date).slice(0, 10), String(b.start_date).slice(0, 10), dir)
+        case 'end_date':
+          return compareText(String(a.end_date).slice(0, 10), String(b.end_date).slice(0, 10), dir)
+        case 'notes':
+          return compareText(a.notes, b.notes, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [contracts, contractTableSort])
 
   const recomputeGross = useCallback((rows: AmountRow[]) => {
     const comp = rows.map(r => {
@@ -423,16 +512,17 @@ export function EmployeeDetailClient({
         <Section title="Kontrak & perpanjangan">
           <CrudTable
             title="kontrak"
-            data={contracts}
+            data={sortedContracts}
+            sort={contractSortProp}
             fields={[
               { key: 'start_date', label: 'Mulai', required: true, type: 'date' },
               { key: 'end_date', label: 'Berakhir', required: true, type: 'date' },
               { key: 'notes', label: 'Catatan', placeholder: 'Perpanjangan ke-2' },
             ]}
             displayCols={[
-              { key: 'start_date', label: 'Mulai', render: r => String(r.start_date).slice(0, 10) },
-              { key: 'end_date', label: 'Berakhir', render: r => String(r.end_date).slice(0, 10) },
-              { key: 'notes', label: 'Catatan' },
+              { key: 'start_date', label: 'Mulai', sortable: 'text', render: r => String(r.start_date).slice(0, 10) },
+              { key: 'end_date', label: 'Berakhir', sortable: 'text', render: r => String(r.end_date).slice(0, 10) },
+              { key: 'notes', label: 'Catatan', sortable: 'text' },
             ]}
             onSave={onSaveContract}
             onDelete={onDeleteContract}
@@ -515,15 +605,48 @@ export function EmployeeDetailClient({
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Kode</th>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Label</th>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Jenis</th>
-              <th style={{ textAlign: 'right', padding: '8px 0' }}>Nominal</th>
-              {['owner', 'finance'].includes(myRole) && <th style={{ textAlign: 'right', padding: '8px 0' }}></th>}
+              <SortableTh
+                label="Kode"
+                columnKey="code"
+                activeKey={sortComp.key}
+                direction={sortComp.dir}
+                onToggle={toggleSortComp}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Label"
+                columnKey="label"
+                activeKey={sortComp.key}
+                direction={sortComp.dir}
+                onToggle={toggleSortComp}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Jenis"
+                columnKey="kind"
+                activeKey={sortComp.key}
+                direction={sortComp.dir}
+                onToggle={toggleSortComp}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Nominal"
+                columnKey="amount"
+                activeKey={sortComp.key}
+                direction={sortComp.dir}
+                onToggle={toggleSortComp}
+                kind="number"
+                align="right"
+                compact
+              />
+              {['owner', 'finance'].includes(myRole) && <StaticTh compact />}
             </tr>
           </thead>
           <tbody>
-            {amountRows.length === 0 ? (
+            {sortedAmountRows.length === 0 ? (
               <tr>
                 <td
                   colSpan={['owner', 'finance'].includes(myRole) ? 5 : 4}
@@ -533,7 +656,7 @@ export function EmployeeDetailClient({
                 </td>
               </tr>
             ) : (
-              amountRows.map(row => {
+              sortedAmountRows.map(row => {
                 const t = templateFromRow(row)
                 const isEditing = editingId === row.id
                 return (
@@ -700,22 +823,54 @@ export function EmployeeDetailClient({
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Proyek</th>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Utama</th>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Mulai</th>
-              <th style={{ textAlign: 'left', padding: '8px 0' }}>Selesai</th>
-              <th style={{ textAlign: 'right', padding: '8px 0' }}></th>
+              <SortableTh
+                label="Proyek"
+                columnKey="project"
+                activeKey={sortAssign.key}
+                direction={sortAssign.dir}
+                onToggle={toggleSortAssign}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Utama"
+                columnKey="is_primary"
+                activeKey={sortAssign.key}
+                direction={sortAssign.dir}
+                onToggle={toggleSortAssign}
+                kind="number"
+                compact
+              />
+              <SortableTh
+                label="Mulai"
+                columnKey="started_on"
+                activeKey={sortAssign.key}
+                direction={sortAssign.dir}
+                onToggle={toggleSortAssign}
+                kind="text"
+                compact
+              />
+              <SortableTh
+                label="Selesai"
+                columnKey="ended_on"
+                activeKey={sortAssign.key}
+                direction={sortAssign.dir}
+                onToggle={toggleSortAssign}
+                kind="text"
+                compact
+              />
+              <StaticTh compact align="right" />
             </tr>
           </thead>
           <tbody>
-            {assignments.length === 0 ? (
+            {sortedAssignments.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ padding: '12px 0', color: '#94A3B8' }}>
                   Belum ada penugasan.
                 </td>
               </tr>
             ) : (
-              assignments.map(a => (
+              sortedAssignments.map(a => (
                 <tr key={a.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
                   <td style={{ padding: '10px 0', color: '#0F172A' }}>{a.project?.name ?? a.project_id}</td>
                   <td style={{ padding: '10px 0' }}>{a.is_primary ? 'Ya' : '—'}</td>

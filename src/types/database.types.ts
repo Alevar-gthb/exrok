@@ -66,6 +66,7 @@ export type ProjectUpdate = Partial<ProjectInsert>
 export interface Expense {
   id: string                  // UUID
   ref_no: string | null
+  submission_date: string     // DATE tanggal pengajuan
   transaction_date: string    // DATE → ISO string "YYYY-MM-DD"
   type: ExpenseType
   description: string | null

@@ -3,6 +3,8 @@
 import { useMemo, useState, useEffect } from 'react'
 import { createClient } from '@/supabase/client'
 import { CrudTable } from '@/components/crud-table'
+import { useCrudTableSort } from '@/lib/crud-table-sort'
+import { compareText } from '@/lib/table-sort'
 
 type TemplateRow = {
   id: string
@@ -26,6 +28,7 @@ export function SalaryComponentsSettingsClient({
 }) {
   const supabase = createClient()
   const [rows, setRows] = useState<TemplateRow[]>(initialRows)
+  const { tableSort, sortProp } = useCrudTableSort()
 
   useEffect(() => {
     setRows(initialRows)
@@ -40,6 +43,30 @@ export function SalaryComponentsSettingsClient({
       })),
     [rows]
   )
+
+  const sortedCrudData = useMemo(() => {
+    const key = tableSort.key
+    if (!key) return crudData
+    const dir = tableSort.dir
+    const copy = [...crudData]
+    copy.sort((a, b) => {
+      switch (key) {
+        case 'code':
+          return compareText(a.code, b.code, dir)
+        case 'label':
+          return compareText(a.label, b.label, dir)
+        case 'kind':
+          return compareText(a.kind, b.kind, dir)
+        case 'aktif':
+          return compareText(a.aktif, b.aktif, dir)
+        case 'gaji_bulanan':
+          return compareText(a.gaji_bulanan, b.gaji_bulanan, dir)
+        default:
+          return 0
+      }
+    })
+    return copy
+  }, [crudData, tableSort])
 
   async function load() {
     const { data: d } = await supabase
@@ -73,7 +100,8 @@ export function SalaryComponentsSettingsClient({
   return (
     <CrudTable
       title="komponen master"
-      data={crudData}
+      data={sortedCrudData}
+      sort={sortProp}
       showDelete={myRole === 'owner'}
       fields={[
         { key: 'code', label: 'Kode', required: true, placeholder: 'BASE, TUNJ_TRANSPORT' },
@@ -89,11 +117,11 @@ export function SalaryComponentsSettingsClient({
         },
       ]}
       displayCols={[
-        { key: 'code', label: 'Kode' },
-        { key: 'label', label: 'Label' },
-        { key: 'kind', label: 'Jenis' },
-        { key: 'aktif', label: 'Aktif' },
-        { key: 'gaji_bulanan', label: 'Gaji bulanan' },
+        { key: 'code', label: 'Kode', sortable: 'text' },
+        { key: 'label', label: 'Label', sortable: 'text' },
+        { key: 'kind', label: 'Jenis', sortable: 'text' },
+        { key: 'aktif', label: 'Aktif', sortable: 'text' },
+        { key: 'gaji_bulanan', label: 'Gaji bulanan', sortable: 'text' },
       ]}
       onSave={onSave}
       onDelete={onDelete}
