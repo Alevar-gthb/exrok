@@ -28,7 +28,7 @@ export type ExpenseReportItemRow = {
   subcategory: { id: string; name: string } | null
 }
 
-export function ExpenseReportItemsTable({ items }: { items: ExpenseReportItemRow[] }) {
+export function ExpenseReportItemsTable({ items, loadMoreHref = null }: { items: ExpenseReportItemRow[]; loadMoreHref?: string | null }) {
   const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
   const toggle = useCallback((key: string) => {
     setTableSort(s => cycleColumnSort(s, key))
@@ -181,6 +181,13 @@ export function ExpenseReportItemsTable({ items }: { items: ExpenseReportItemRow
           ))}
         </tbody>
       </table>
+      {loadMoreHref && (
+        <div style={{ padding: '10px', textAlign: 'center' }}>
+          <a href={loadMoreHref} style={{ fontSize: '12px', color: '#334155', textDecoration: 'none' }}>
+            Muat transaksi berikutnya
+          </a>
+        </div>
+      )}
     </div>
   )
 }

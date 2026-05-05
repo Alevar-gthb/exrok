@@ -28,6 +28,12 @@ export default async function ReimburseReportPage({
     type?: string
     employee?: string
     view?: string
+    exp_cursor_created_at?: string
+    exp_cursor_id?: string
+    batch_cursor_created_at?: string
+    batch_cursor_id?: string
+    limit?: string
+    batch_limit?: string
   }
 }) {
   const sp = searchParams
@@ -38,6 +44,8 @@ export default async function ReimburseReportPage({
   const type = sp.type?.trim() || ''
   const employeeId = sp.employee?.trim() || ''
   const view = sp.view === 'paid' ? 'paid' : 'payable'
+  const expPageSize = Math.min(Math.max(Number(sp.limit ?? 150) || 150, 20), 300)
+  const batchPageSize = Math.min(Math.max(Number(sp.batch_limit ?? 100) || 100, 20), 300)
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -52,7 +60,7 @@ export default async function ReimburseReportPage({
   let expQuery = supabase
     .from('expenses')
     .select(`
-      id, ref_no, transaction_date, type, description,
+      id, created_at, ref_no, transaction_date, type, description,
       total_payment, status, business_unit, employee_id,
       reimbursement_batch_id, payment_date,
       employee:employees(id, full_name)
@@ -60,24 +68,38 @@ export default async function ReimburseReportPage({
     .gte('transaction_date', from)
     .lte('transaction_date', to)
     .in('status', ['Approved', 'Paid'])
-    .order('transaction_date', { ascending: false })
-    .limit(500)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(expPageSize + 1)
 
   if (bu === 'RKT' || bu === 'SPH') expQuery = expQuery.eq('business_unit', bu)
   if (type === 'PO' || type === 'Reimburse' || type === 'Salary') expQuery = expQuery.eq('type', type)
   if (employeeId) expQuery = expQuery.eq('employee_id', employeeId)
+  if (sp.exp_cursor_created_at && sp.exp_cursor_id) {
+    expQuery = expQuery.or(`created_at.lt.${sp.exp_cursor_created_at},and(created_at.eq.${sp.exp_cursor_created_at},id.lt.${sp.exp_cursor_id})`)
+  }
 
-  const [{ data: expenses }, { data: employees }, { data: batches }] = await Promise.all([
+  let batchQuery = supabase
+    .from('reimbursement_batches')
+    .select('id, batch_no, batch_date, payment_method, reference_no, notes, total_amount, created_at')
+    .gte('batch_date', from)
+    .lte('batch_date', to)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(batchPageSize + 1)
+  if (sp.batch_cursor_created_at && sp.batch_cursor_id) {
+    batchQuery = batchQuery.or(`created_at.lt.${sp.batch_cursor_created_at},and(created_at.eq.${sp.batch_cursor_created_at},id.lt.${sp.batch_cursor_id})`)
+  }
+
+  const [{ data: expensesRaw }, { data: employees }, { data: batchesRaw }] = await Promise.all([
     expQuery,
     supabase.from('employees').select('id, full_name').order('full_name'),
-    supabase
-      .from('reimbursement_batches')
-      .select('id, batch_no, batch_date, payment_method, reference_no, notes, total_amount, created_at')
-      .gte('batch_date', from)
-      .lte('batch_date', to)
-      .order('created_at', { ascending: false })
-      .limit(100),
+    batchQuery,
   ])
+  const expenses = (expensesRaw ?? []).slice(0, expPageSize)
+  const batches = (batchesRaw ?? []).slice(0, batchPageSize)
+  const hasMoreExpenses = (expensesRaw?.length ?? 0) > expPageSize
+  const hasMoreBatches = (batchesRaw?.length ?? 0) > batchPageSize
 
   const batchIds = (batches ?? []).map(b => b.id)
   let itemCountByBatch: Record<string, number> = {}
@@ -130,6 +152,42 @@ export default async function ReimburseReportPage({
       employees={employees ?? []}
       batches={batchesWithCounts as ReimburseReportBatchRow[]}
       initialFilters={{ from, to, bu, type, employeeId, view }}
+      loadMoreExpensesHref={
+        hasMoreExpenses && expenseRows.length
+          ? (() => {
+              const src = expenses[expenses.length - 1] as { created_at: string; id: string }
+              const p = new URLSearchParams({ from, to, view, limit: String(expPageSize), batch_limit: String(batchPageSize) })
+              if (bu) p.set('bu', bu)
+              if (type) p.set('type', type)
+              if (employeeId) p.set('employee', employeeId)
+              p.set('exp_cursor_created_at', src.created_at)
+              p.set('exp_cursor_id', src.id)
+              if (sp.batch_cursor_created_at && sp.batch_cursor_id) {
+                p.set('batch_cursor_created_at', sp.batch_cursor_created_at)
+                p.set('batch_cursor_id', sp.batch_cursor_id)
+              }
+              return `/reports/reimburse?${p.toString()}`
+            })()
+          : null
+      }
+      loadMoreBatchesHref={
+        hasMoreBatches && batches.length
+          ? (() => {
+              const src = batches[batches.length - 1] as { created_at: string; id: string }
+              const p = new URLSearchParams({ from, to, view, limit: String(expPageSize), batch_limit: String(batchPageSize) })
+              if (bu) p.set('bu', bu)
+              if (type) p.set('type', type)
+              if (employeeId) p.set('employee', employeeId)
+              if (sp.exp_cursor_created_at && sp.exp_cursor_id) {
+                p.set('exp_cursor_created_at', sp.exp_cursor_created_at)
+                p.set('exp_cursor_id', sp.exp_cursor_id)
+              }
+              p.set('batch_cursor_created_at', src.created_at)
+              p.set('batch_cursor_id', src.id)
+              return `/reports/reimburse?${p.toString()}`
+            })()
+          : null
+      }
     />
   )
 }

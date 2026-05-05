@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { PAYROLL_COMPONENT_COLUMN_MAP, PAYROLL_REQUIRED_HEADERS } from '@/lib/payroll-import/mapping'
+import { PAYROLL_COMPONENT_COLUMN_MAP, PAYROLL_PROJECT_LIST_HEADER, PAYROLL_REQUIRED_HEADERS } from '@/lib/payroll-import/mapping'
 import { computePph21System, deriveTerCategory, pickTerRate, shouldApplyTerMonthly } from '@/lib/payroll-import/ter'
 import type { PayrollImportIssue, PayrollImportMode, PayrollImportSummary } from '@/types/payroll-import'
 
@@ -18,6 +18,7 @@ type ParsedRow = {
   thpExcel: number
   transferExcel: number
   componentValues: Record<string, number>
+  projectNames: string[]
 }
 
 const SHEET_MONTH: Record<string, number> = {
@@ -99,6 +100,13 @@ function parseSheetRows(ws: ExcelJS.Worksheet, issues: PayrollImportIssue[]): Pa
       if (!col) continue
       componentValues[comp.code] = toNumber(readCellValue(row.getCell(col).value))
     }
+    const projectListColumn = headerMap[PAYROLL_PROJECT_LIST_HEADER]
+    const projectListRaw = projectListColumn ? toText(readCellValue(row.getCell(projectListColumn).value)) : ''
+    const projectNames = projectListRaw
+      .split(',')
+      .map(x => x.trim())
+      .filter(Boolean)
+      .filter((name, idx, arr) => arr.findIndex(other => other.toLowerCase() === name.toLowerCase()) === idx)
     parsed.push({
       rowNumber: i,
       npwp,
@@ -112,6 +120,7 @@ function parseSheetRows(ws: ExcelJS.Worksheet, issues: PayrollImportIssue[]): Pa
       thpExcel: toNumber(readCellValue(row.getCell(headerMap['THP']).value)),
       transferExcel: toNumber(readCellValue(row.getCell(headerMap['Transfer']).value)),
       componentValues,
+      projectNames,
     })
   }
   return parsed
@@ -199,23 +208,27 @@ async function upsertEmployee(
   return { id: ins.id }
 }
 
-async function upsertPayrollLine(params: {
+async function replacePayrollLinesForEmployee(params: {
   supabase: any
   runId: string
   employeeId: string
   row: ParsedRow
+  projectIds: Array<string | null>
   terCategory: string | null
   terRate: number
   pph21System: number
 }) {
-  const { supabase, runId, employeeId, row, terCategory, terRate, pph21System } = params
+  const { supabase, runId, employeeId, row, projectIds, terCategory, terRate, pph21System } = params
   const pph21Gap = row.pph21Excel - pph21System
   const amount = row.transferExcel || row.thpExcel || row.grossIncome - row.pph21Excel
 
-  const payload = {
+  const { error: deleteErr } = await supabase.from('payroll_run_lines').delete().eq('run_id', runId).eq('employee_id', employeeId)
+  if (deleteErr) throw new Error(deleteErr.message)
+
+  const payloads = projectIds.map(projectId => ({
     run_id: runId,
     employee_id: employeeId,
-    project_id: null,
+    project_id: projectId,
     amount: amount.toFixed(2),
     base_amount: row.grossIncome.toFixed(2),
     gross_income: row.grossIncome.toFixed(2),
@@ -231,13 +244,12 @@ async function upsertPayrollLine(params: {
       ter_rate_excel: row.terRateExcel,
       thp_excel: row.thpExcel,
       transfer_excel: row.transferExcel,
+      project_list_excel: row.projectNames,
       components: row.componentValues,
     },
-  }
+  }))
 
-  const { error } = await supabase
-    .from('payroll_run_lines')
-    .upsert(payload, { onConflict: 'run_id,employee_id', ignoreDuplicates: false })
+  const { error } = await supabase.from('payroll_run_lines').insert(payloads)
   if (error) throw new Error(error.message)
 }
 
@@ -269,6 +281,18 @@ async function upsertRun(
   return run.id
 }
 
+async function fetchProjectLookup(supabase: any): Promise<Map<string, { id: string; name: string }>> {
+  const { data, error } = await supabase.from('projects').select('id, name')
+  if (error) throw new Error(error.message)
+  const out = new Map<string, { id: string; name: string }>()
+  for (const row of data ?? []) {
+    const name = toText(row.name)
+    if (!name) continue
+    out.set(name.toLowerCase(), { id: row.id, name })
+  }
+  return out
+}
+
 export async function importPayrollWorkbook(params: {
   supabase: any
   fileBuffer: any
@@ -276,13 +300,27 @@ export async function importPayrollWorkbook(params: {
   year: number
   userId: string | null
   mismatchTolerance: number
+  onProgress?: (payload: {
+    status: 'running' | 'completed' | 'failed'
+    stage: string
+    message?: string
+    sheetsProcessed: number
+    rowsProcessed: number
+    employeesUpserted: number
+    componentsUpserted: number
+    payrollLinesUpserted: number
+    mismatchCount: number
+    warnings: number
+    errors: number
+  }) => Promise<void> | void
 }): Promise<PayrollImportSummary> {
-  const { supabase, fileBuffer, mode, year, userId, mismatchTolerance } = params
+  const { supabase, fileBuffer, mode, year, userId, mismatchTolerance, onProgress } = params
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer as any)
   const issues: PayrollImportIssue[] = []
   const terCards = await fetchTerCards(supabase)
   const templateMap = await ensureTemplates(supabase)
+  const projectsByName = await fetchProjectLookup(supabase)
 
   let rowsProcessed = 0
   let employeesUpserted = 0
@@ -290,11 +328,30 @@ export async function importPayrollWorkbook(params: {
   let payrollLinesUpserted = 0
   let mismatchCount = 0
   let sheetsProcessed = 0
+  const publishProgress = async (status: 'running' | 'completed' | 'failed', stage: string, message?: string) => {
+    if (!onProgress) return
+    await onProgress({
+      status,
+      stage,
+      message,
+      sheetsProcessed,
+      rowsProcessed,
+      employeesUpserted,
+      componentsUpserted,
+      payrollLinesUpserted,
+      mismatchCount,
+      warnings: issues.filter(i => i.level === 'warning').length,
+      errors: issues.filter(i => i.level === 'error').length,
+    })
+  }
+
+  await publishProgress('running', 'workbook_loaded', 'Workbook berhasil dibaca')
 
   for (const ws of workbook.worksheets) {
     const month = SHEET_MONTH[ws.name.trim().toUpperCase()]
     if (!month) continue
     sheetsProcessed += 1
+    await publishProgress('running', 'sheet_processing', `Memproses sheet ${ws.name}`)
     const period = { year, month }
     const parsedRows = parseSheetRows(ws, issues)
     if (!parsedRows.length) continue
@@ -326,7 +383,23 @@ export async function importPayrollWorkbook(params: {
             message: `Selisih PPh21 di atas toleransi: excel=${row.pph21Excel.toFixed(2)}, system=${pph21System.toFixed(2)}, gap=${gap.toFixed(2)}`,
           })
         }
+
+        const invalidProjectNames = row.projectNames.filter(name => !projectsByName.has(name.toLowerCase()))
+        if (invalidProjectNames.length) {
+          issues.push({
+            rowNumber: row.rowNumber,
+            employeeName: row.fullName,
+            level: 'error',
+            message: `Project tidak ditemukan: ${invalidProjectNames.join(', ')}`,
+          })
+          continue
+        }
         if (mode === 'dry-run') continue
+        const projectIds = row.projectNames.length
+          ? row.projectNames
+              .map(name => projectsByName.get(name.toLowerCase())?.id ?? null)
+              .filter((id): id is string => Boolean(id))
+          : [null]
 
         const emp = await upsertEmployee(supabase, row)
         employeesUpserted += 1
@@ -347,16 +420,17 @@ export async function importPayrollWorkbook(params: {
           componentsUpserted += 1
         }
 
-        await upsertPayrollLine({
+        await replacePayrollLinesForEmployee({
           supabase,
           runId,
           employeeId: emp.id,
           row,
+          projectIds,
           terCategory: category,
           terRate,
           pph21System,
         })
-        payrollLinesUpserted += 1
+        payrollLinesUpserted += projectIds.length
       } catch (error) {
         issues.push({
           rowNumber: row.rowNumber,
@@ -365,8 +439,13 @@ export async function importPayrollWorkbook(params: {
           message: error instanceof Error ? error.message : 'Unknown error',
         })
       }
+      if (rowsProcessed % 25 === 0) {
+        await publishProgress('running', 'rows_processing', `Baris diproses: ${rowsProcessed}`)
+      }
     }
   }
+
+  await publishProgress('completed', 'completed', 'Import payroll selesai')
 
   return {
     mode,

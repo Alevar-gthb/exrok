@@ -118,7 +118,7 @@ export interface Database {
     }
     Functions: {
       submit_expense: {
-        Args: { p_expense_id: string }
+        Args: { p_expense_id: string; p_expected_updated_at: string }
         Returns: Json
       }
       process_approval: {
@@ -126,6 +126,7 @@ export interface Database {
           p_expense_approval_id: string
           p_action: string
           p_notes?: string | null
+          p_expected_updated_at?: string | null
         }
         Returns: Json
       }
@@ -144,6 +145,12 @@ export interface Database {
           p_payment_method: string
           p_reference_no?: string | null
           p_notes?: string | null
+        }
+        Returns: Json
+      }
+      create_and_submit_expense: {
+        Args: {
+          p_payload: Json
         }
         Returns: Json
       }

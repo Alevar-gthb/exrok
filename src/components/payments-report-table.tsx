@@ -27,7 +27,7 @@ export type PaymentsReportRow = {
   category: { id: string; name: string } | null
 }
 
-export function PaymentsReportTable({ rows }: { rows: PaymentsReportRow[] }) {
+export function PaymentsReportTable({ rows, loadMoreHref = null }: { rows: PaymentsReportRow[]; loadMoreHref?: string | null }) {
   const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
   const toggleSort = useCallback((key: string) => {
     setTableSort(s => cycleColumnSort(s, key))
@@ -184,6 +184,13 @@ export function PaymentsReportTable({ rows }: { rows: PaymentsReportRow[] }) {
           </tbody>
         </table>
       </div>
+      {loadMoreHref && (
+        <div style={{ padding: '10px', borderTop: '1px solid #E2E8F0', textAlign: 'center' }}>
+          <a href={loadMoreHref} style={{ fontSize: '12px', color: '#334155', textDecoration: 'none' }}>
+            Muat pembayaran berikutnya
+          </a>
+        </div>
+      )}
     </div>
   )
 }

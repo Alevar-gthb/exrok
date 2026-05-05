@@ -1,19 +1,20 @@
 # Exrok — Deployment Checklist
+
 Ikuti urutan ini secara tepat. Jangan lompat langkah.
 
 ---
 
 ## STEP 1 · Supabase Project Setup (5 menit)
 
-1. Buka https://supabase.com → New project
+1. Buka [https://supabase.com](https://supabase.com) → New project
 2. Catat: **Project URL** dan **Anon Key** (Project Settings → API)
 3. Isi `.env.local`:
-   ```
+  ```
    NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
    SUPABASE_SERVICE_ROLE_KEY=eyJhbGci...
    NEXT_PUBLIC_APP_URL=https://your-app.railway.app
-   ```
+  ```
 
 ---
 
@@ -22,14 +23,17 @@ Ikuti urutan ini secara tepat. Jangan lompat langkah.
 Buka **Supabase Dashboard → SQL Editor**, jalankan file-file ini **satu per satu** sesuai urutan:
 
 ### 001 — Schema (tabel utama)
+
 Salin isi dari `DEVELOPMENT_GUIDE.md` (bagian SQL Schema) dan jalankan.
 
 ### 002 — RLS Policies
+
 ```
 supabase/migrations/002_rls_policies.sql
 ```
 
 ### 003 — Audit Triggers
+
 ```
 supabase/migrations/003_audit_triggers.sql
 ```
@@ -40,8 +44,8 @@ supabase/migrations/003_audit_triggers.sql
 
 1. Dashboard → **Authentication → Providers** → pastikan **Email** enabled
 2. Dashboard → **Authentication → URL Configuration**:
-   - Site URL: `https://your-app.railway.app`
-   - Redirect URLs tambahkan: `https://your-app.railway.app/auth/callback`
+  - Site URL: `https://your-app.railway.app`
+  - Redirect URLs tambahkan: `https://your-app.railway.app/auth/callback`
 
 ---
 
@@ -51,10 +55,11 @@ supabase/migrations/003_audit_triggers.sql
 2. Nama: `expense-documents`
 3. Public: **Ya** (agar URL dokumen bisa ditampilkan)
 4. Tambahkan policy di bucket:
-   - **SELECT**: `authenticated` bisa baca
-   - **INSERT**: `authenticated` bisa upload ke folder `{user_id}/`
+  - **SELECT**: `authenticated` bisa baca
+  - **INSERT**: `authenticated` bisa upload ke folder `{user_id}/`
 
 SQL untuk storage policy (jalankan di SQL Editor):
+
 ```sql
 CREATE POLICY "storage_expense_select"
 ON storage.objects FOR SELECT
@@ -78,6 +83,7 @@ Karena signup publik tidak ada, tambahkan user manual:
 1. Supabase Dashboard → **Authentication → Users → Add user**
 2. Isi email & password
 3. Jalankan SQL ini untuk mendaftarkannya sebagai karyawan:
+
 ```sql
 INSERT INTO employees (full_name, email, salary_amount, role, status)
 VALUES ('Nama Anda', 'email@roketin.com', 0, 'owner', 'Active');
@@ -124,10 +130,18 @@ git add . && git commit -m "feat: Exrok MVP" && git push
 ## STEP 8 · Generate TypeScript Types (opsional tapi direkomendasikan)
 
 Setelah database aktif, jalankan untuk type-safety penuh:
+
 ```bash
 npx supabase gen types typescript \
   --project-id YOUR_PROJECT_ID \
   > supabase/database.types.ts
+```
+
+Untuk alur lokal yang konsisten dengan CI, gunakan:
+
+```bash
+npm run db:typegen
+npm run db:typecheck
 ```
 
 ---
@@ -136,15 +150,15 @@ npx supabase gen types typescript \
 
 Checklist setelah deploy:
 
-- [ ] `/login` muncul tanpa error
-- [ ] Login berhasil, redirect ke `/expenses`
-- [ ] Sidebar muncul dengan nama user & role
-- [ ] Halaman `/expenses` menampilkan tabel (kosong = normal)
-- [ ] Klik "Ajukan Expense" → form terbuka
-- [ ] Isi form, submit → muncul di tabel dengan status "Menunggu"
-- [ ] Login sebagai owner → tombol "Setujui/Tolak" muncul
-- [ ] Approve → status berubah ke "Disetujui"
-- [ ] Upload file → file muncul di Supabase Storage
+- `/login` muncul tanpa error
+- Login berhasil, redirect ke `/expenses`
+- Sidebar muncul dengan nama user & role
+- Halaman `/expenses` menampilkan tabel (kosong = normal)
+- Klik "Ajukan Expense" → form terbuka
+- Isi form, submit → muncul di tabel dengan status "Menunggu"
+- Login sebagai owner → tombol "Setujui/Tolak" muncul
+- Approve → status berubah ke "Disetujui"
+- Upload file → file muncul di Supabase Storage
 
 ---
 
@@ -179,3 +193,4 @@ supabase/
     ├── 002_rls_policies.sql       ← RLS semua tabel
     └── 003_audit_triggers.sql     ← Audit log triggers
 ```
+

@@ -1,0 +1,37 @@
+name: Schema Types Guard
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'cursor/**'
+
+jobs:
+  schema-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+      uses: actions/checkout@v4
+
+      - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm
+
+      - name: Setup Supabase CLI
+      uses: supabase/setup-cli@v1
+      with:
+        version: latest
+
+      - name: Install dependencies
+      run: npm ci
+
+      - name: Ensure generated types are up to date
+      run: |
+        npm run db:typegen
+        git diff --exit-code -- src/supabase/database.types.ts
+
+      - name: Drift + Zod contract checks
+      run: npm run db:typecheck

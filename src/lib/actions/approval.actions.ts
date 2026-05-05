@@ -8,7 +8,17 @@ export async function rpcSubmitExpense(expenseId: string): Promise<ActionResult<
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
 
-  const { data, error } = await supabase.rpc('submit_expense', { p_expense_id: expenseId })
+  const { data: expenseRow, error: expenseErr } = await supabase
+    .from('expenses')
+    .select('id, updated_at')
+    .eq('id', expenseId)
+    .single()
+  if (expenseErr || !expenseRow) return { success: false, error: 'Expense tidak ditemukan' }
+
+  const { data, error } = await supabase.rpc('submit_expense', {
+    p_expense_id: expenseId,
+    p_expected_updated_at: expenseRow.updated_at,
+  })
   if (error) return { success: false, error: error.message }
   const row = data as { success?: boolean; message?: string; status?: string }
   if (row.success === false) return { success: false, error: row.message ?? 'Gagal submit' }
@@ -24,10 +34,18 @@ export async function rpcProcessApproval(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
 
+  const { data: approvalRow, error: approvalErr } = await supabase
+    .from('expense_approvals')
+    .select('id, updated_at')
+    .eq('id', approvalId)
+    .single()
+  if (approvalErr || !approvalRow) return { success: false, error: 'Approval tidak ditemukan' }
+
   const { data, error } = await supabase.rpc('process_approval', {
     p_expense_approval_id: approvalId,
     p_action: action,
     p_notes: notes,
+    p_expected_updated_at: approvalRow.updated_at,
   })
   if (error) return { success: false, error: error.message }
   const row = data as { success?: boolean; message?: string }

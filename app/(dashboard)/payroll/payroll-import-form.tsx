@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { PayrollImportSummary } from '@/types/payroll-import'
+import { createClient } from '@/supabase/client'
 
 export function PayrollImportForm() {
   const now = new Date()
@@ -12,23 +13,65 @@ export function PayrollImportForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<PayrollImportSummary | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{
+    status: string
+    stage: string
+    message: string | null
+    rows: number
+    sheets: number
+  } | null>(null)
 
   const topIssues = useMemo(() => summary?.issues.slice(0, 12) ?? [], [summary])
+
+  useEffect(() => {
+    if (!jobId) return
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`payroll-import-${jobId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'payroll_import_jobs',
+          filter: `id=eq.${jobId}`,
+        },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>
+          setProgress({
+            status: String(row.status ?? ''),
+            stage: String(row.stage ?? ''),
+            message: row.message ? String(row.message) : null,
+            rows: Number(row.rows_processed ?? 0),
+            sheets: Number(row.sheets_processed ?? 0),
+          })
+        }
+      )
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [jobId])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     setSummary(null)
+    setProgress(null)
     if (!file) {
       setError('Pilih file Excel dulu.')
       return
     }
     setLoading(true)
     const form = new FormData()
+    const generatedJobId = crypto.randomUUID()
+    setJobId(generatedJobId)
     form.append('file', file)
     form.append('year', year)
     form.append('mode', mode)
     form.append('mismatchTolerance', tolerance)
+    form.append('job_id', generatedJobId)
 
     try {
       const res = await fetch('/api/payroll/import', { method: 'POST', body: form })
@@ -37,6 +80,7 @@ export function PayrollImportForm() {
         throw new Error(json.error ?? 'Gagal import payroll')
       }
       setSummary(json.data as PayrollImportSummary)
+      if (json.jobId) setJobId(String(json.jobId))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan')
     } finally {
@@ -60,6 +104,14 @@ export function PayrollImportForm() {
       <p style={{ margin: 0, marginBottom: '14px', fontSize: '12px', color: '#64748B' }}>
         Gunakan dry-run untuk cek mismatch PPh21 (hybrid TER), lalu commit jika hasil valid.
       </p>
+      <div style={{ marginBottom: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <a href="/api/payroll/import/template" style={btnSecondary}>
+          Download template payroll terbaru
+        </a>
+        <span style={{ fontSize: '12px', color: '#64748B', alignSelf: 'center' }}>
+          Kolom <strong>Project List</strong>: isi nama project dipisah koma. Contoh: Project A, Project B
+        </span>
+      </div>
 
       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div>
@@ -92,6 +144,15 @@ export function PayrollImportForm() {
       </div>
 
       {error && <p style={{ marginTop: 10, marginBottom: 0, fontSize: '12px', color: '#B91C1C' }}>{error}</p>}
+      {progress && (
+        <div style={{ marginTop: 10, fontSize: '12px', color: '#334155' }}>
+          <strong>Status:</strong> {progress.status} · <strong>Stage:</strong> {progress.stage}
+          {progress.message ? ` · ${progress.message}` : ''}
+          <div style={{ marginTop: '4px' }}>
+            Sheets: {progress.sheets} · Rows: {progress.rows}
+          </div>
+        </div>
+      )}
 
       {summary && (
         <div style={{ marginTop: 14, padding: 12, border: '1px solid #E2E8F0', borderRadius: 10, background: '#F8FAFC' }}>
@@ -137,4 +198,18 @@ const btnPrimary: React.CSSProperties = {
   border: 'none',
   borderRadius: '8px',
   cursor: 'pointer',
+}
+
+const btnSecondary: React.CSSProperties = {
+  padding: '8px 12px',
+  fontSize: '12px',
+  fontWeight: '600',
+  color: '#0F172A',
+  background: '#F8FAFC',
+  border: '1px solid #CBD5E1',
+  borderRadius: '8px',
+  cursor: 'pointer',
+  textDecoration: 'none',
+  display: 'inline-flex',
+  alignItems: 'center',
 }

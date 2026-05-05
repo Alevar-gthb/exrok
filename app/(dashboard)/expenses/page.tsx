@@ -13,12 +13,16 @@ export const metadata = { title: 'Expense | Exrok' }
 export default async function ExpensesPage({
   searchParams,
 }: {
-  searchParams: { status?: string; project?: string; from?: string; to?: string }
+  searchParams: { status?: string; project?: string; from?: string; to?: string; cursor_created_at?: string; cursor_id?: string; limit?: string }
 }) {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  const pageSize = Math.min(Math.max(Number(searchParams.limit ?? 100) || 100, 20), 200)
+  const cursorCreatedAt = typeof searchParams.cursor_created_at === 'string' ? searchParams.cursor_created_at : ''
+  const cursorId = typeof searchParams.cursor_id === 'string' ? searchParams.cursor_id : ''
 
   // Build query dengan filter
   let query = supabase
@@ -31,14 +35,32 @@ export default async function ExpensesPage({
       employee:employees(id, full_name)
     `)
     .order('created_at', { ascending: false })
-    .limit(100)
+    .order('id', { ascending: false })
+    .limit(pageSize + 1)
 
   if (searchParams.status) query = query.eq('status', searchParams.status)
   if (searchParams.project) query = query.eq('project_id', searchParams.project)
   if (searchParams.from) query = query.gte('transaction_date', searchParams.from)
   if (searchParams.to) query = query.lte('transaction_date', searchParams.to)
+  if (cursorCreatedAt && cursorId) {
+    query = query.or(`created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`)
+  }
 
-  const { data: expenses } = await query
+  const { data: expensesRaw } = await query
+  const hasMore = (expensesRaw?.length ?? 0) > pageSize
+  const expenses = hasMore ? (expensesRaw ?? []).slice(0, pageSize) : (expensesRaw ?? [])
+  const last = expenses.length > 0 ? expenses[expenses.length - 1] as { created_at: string; id: string } : null
+  const nextParams = new URLSearchParams()
+  if (searchParams.status) nextParams.set('status', searchParams.status)
+  if (searchParams.project) nextParams.set('project', searchParams.project)
+  if (searchParams.from) nextParams.set('from', searchParams.from)
+  if (searchParams.to) nextParams.set('to', searchParams.to)
+  nextParams.set('limit', String(pageSize))
+  if (hasMore && last) {
+    nextParams.set('cursor_created_at', last.created_at)
+    nextParams.set('cursor_id', last.id)
+  }
+  const loadMoreHref = hasMore && last ? `/expenses?${nextParams.toString()}` : null
 
   // Fetch projects untuk filter dropdown
   const { data: projects } = await supabase
@@ -77,6 +99,7 @@ export default async function ExpensesPage({
         expenses={(expenses ?? []) as unknown as ComponentProps<typeof ExpenseTable>['expenses']}
         projects={projects ?? []}
         userId={user.id}
+        loadMoreHref={loadMoreHref}
       />
     </div>
   )
