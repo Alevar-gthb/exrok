@@ -38,6 +38,7 @@ function parseStatuses(raw: string | string[] | undefined): ReportStatus[] {
 
 type ExpenseRow = {
   id: string
+  created_at: string
   ref_no: string | null
   transaction_date: string
   type: string
@@ -79,11 +80,15 @@ export default async function ExpenseReportPage({
   const projectNone = projectRaw === '__none__'
   const projectId = projectRaw && !projectNone && /^[0-9a-f-]{36}$/i.test(projectRaw) ? projectRaw : ''
 
+  const pageSize = Math.min(Math.max(Number(typeof searchParams.limit === 'string' ? searchParams.limit : '120') || 120, 20), 300)
+  const cursorCreatedAt = typeof searchParams.cursor_created_at === 'string' ? searchParams.cursor_created_at : ''
+  const cursorId = typeof searchParams.cursor_id === 'string' ? searchParams.cursor_id : ''
+
   let query = supabase
     .from('expenses')
     .select(
       `
-      id, ref_no, transaction_date, type, status, total_payment, description, business_unit, payment_method, project_id,
+      id, created_at, ref_no, transaction_date, type, status, total_payment, description, business_unit, payment_method, project_id,
       project:projects(id, name),
       category:expense_categories(id, name),
       subcategory:expense_subcategories(id, name)
@@ -92,7 +97,9 @@ export default async function ExpenseReportPage({
     .in('status', statuses)
     .gte('transaction_date', from)
     .lte('transaction_date', to)
-    .order('transaction_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(pageSize + 1)
 
   if (bu) query = query.eq('business_unit', bu as 'RKT' | 'SPH')
   if (type) query = query.eq('type', type as 'PO' | 'Reimburse' | 'Salary')
@@ -100,9 +107,31 @@ export default async function ExpenseReportPage({
   else if (paymentMethod) query = query.eq('payment_method', paymentMethod)
   if (projectNone) query = query.is('project_id', null)
   else if (projectId) query = query.eq('project_id', projectId)
+  if (cursorCreatedAt && cursorId) {
+    query = query.or(`created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`)
+  }
 
   const { data: rowsRaw } = await query
-  const rows = (rowsRaw ?? []) as unknown as ExpenseRow[]
+  const hasMore = (rowsRaw?.length ?? 0) > pageSize
+  const pageRows = hasMore ? (rowsRaw ?? []).slice(0, pageSize) : (rowsRaw ?? [])
+  const rows = pageRows as unknown as ExpenseRow[]
+  const last = rows.length > 0 ? rows[rows.length - 1] : null
+  const nextParams = new URLSearchParams()
+  nextParams.set('from', from)
+  nextParams.set('to', to)
+  statuses.forEach((s) => nextParams.append('st', s))
+  if (bu) nextParams.set('bu', bu)
+  if (type) nextParams.set('type', type)
+  if (paymentMethodNone) nextParams.set('pm', '__none__')
+  else if (paymentMethod) nextParams.set('pm', paymentMethod)
+  if (projectNone) nextParams.set('project_id', '__none__')
+  else if (projectId) nextParams.set('project_id', projectId)
+  nextParams.set('limit', String(pageSize))
+  if (hasMore && last) {
+    nextParams.set('cursor_created_at', last.created_at)
+    nextParams.set('cursor_id', last.id)
+  }
+  const loadMoreHref = hasMore && last ? `/reports/expenses?${nextParams.toString()}` : null
 
   const { data: projects } = await supabase.from('projects').select('id, name').eq('status', 'Active').order('name')
 
@@ -266,7 +295,7 @@ export default async function ExpenseReportPage({
           <div style={{ fontSize: '18px', fontWeight: '700', color: '#0F172A', fontVariantNumeric: 'tabular-nums' }}>{formatIDR(grandTotal)}</div>
         </div>
         <div style={{ fontSize: '13px', color: '#64748B' }}>
-          {rows.length} transaksi · tanggal transaksi {from} s/d {to}
+          {rows.length} transaksi (halaman ini) · tanggal transaksi {from} s/d {to}
         </div>
       </div>
 
@@ -320,6 +349,13 @@ export default async function ExpenseReportPage({
               </div>
             )
           })}
+        </div>
+      )}
+      {loadMoreHref && (
+        <div style={{ marginTop: '14px', textAlign: 'center' }}>
+          <a href={loadMoreHref} style={{ fontSize: '12px', color: '#334155', textDecoration: 'none' }}>
+            Muat data berikutnya
+          </a>
         </div>
       )}
     </div>

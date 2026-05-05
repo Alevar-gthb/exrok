@@ -54,3 +54,5 @@ export const PAYROLL_REQUIRED_HEADERS = [
   'THP',
   'Transfer',
 ]
+
+export const PAYROLL_PROJECT_LIST_HEADER = 'Project List'

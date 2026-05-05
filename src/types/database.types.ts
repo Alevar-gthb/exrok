@@ -98,10 +98,11 @@ export interface Expense {
   ocr_scanned_at?: string | null
   created_by: string | null   // UUID → auth.users.id
   created_at: string
+  updated_at: string
 }
 
 // Insert tidak menyertakan `total_payment` (Generated Column di DB). Bukti bayar hanya setelah Paid.
-export type ExpenseInsert = Omit<Expense, 'id' | 'total_payment' | 'created_at' | 'payment_proof_url'> & {
+export type ExpenseInsert = Omit<Expense, 'id' | 'total_payment' | 'created_at' | 'updated_at' | 'payment_proof_url'> & {
   payment_proof_url?: string | null
 }
 export type ExpenseUpdate = Partial<ExpenseInsert>
@@ -147,9 +148,10 @@ export interface ExpenseApproval {
   notes: string | null
   approved_at: string | null
   created_at: string
+  updated_at: string
 }
 
-export type ExpenseApprovalInsert = Omit<ExpenseApproval, 'id' | 'created_at'>
+export type ExpenseApprovalInsert = Omit<ExpenseApproval, 'id' | 'created_at' | 'updated_at'>
 export type ExpenseApprovalUpdate = Partial<ExpenseApprovalInsert>
 
 // ─── REIMBURSEMENT BATCHES ───────────────────────────────────

@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "payroll:dry-run": "npx tsx scripts/dry-run-payroll-import.ts"
+    "payroll:dry-run": "npx tsx scripts/dry-run-payroll-import.ts",
+    "db:typegen": "npx supabase gen types typescript --local --schema public > src/supabase/database.types.ts",
+    "db:drift-check": "node scripts/check-schema-drift.mjs",
+    "db:zod-check": "node scripts/check-zod-schema-sync.mjs",
+    "db:typecheck": "npm run db:drift-check && npm run db:zod-check"
   },
   "dependencies": {
     "next": "^14.2.0",

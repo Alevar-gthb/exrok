@@ -43,6 +43,7 @@ interface ExpenseTableProps {
   expenses: ExpenseRow[]
   projects: { id: string; name: string }[]
   userId: string
+  loadMoreHref?: string | null
 }
 
 const TYPE_STYLE: Record<string, { bg: string; color: string }> = {
@@ -77,7 +78,7 @@ function TypeBadge({ type }: { type: string }) {
   )
 }
 
-export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) {
+export function ExpenseTable({ expenses, projects, userId, loadMoreHref }: ExpenseTableProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -400,6 +401,24 @@ export function ExpenseTable({ expenses, projects, userId }: ExpenseTableProps) 
           </div>
         )}
       </div>
+      {loadMoreHref && (
+        <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'center' }}>
+          <a
+            href={loadMoreHref}
+            style={{
+              padding: '8px 14px',
+              fontSize: '12px',
+              borderRadius: '8px',
+              border: '1px solid #CBD5E1',
+              color: '#334155',
+              textDecoration: 'none',
+              background: '#fff',
+            }}
+          >
+            Muat data berikutnya
+          </a>
+        </div>
+      )}
     </div>
   )
 }

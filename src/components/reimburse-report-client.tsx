@@ -55,6 +55,8 @@ interface Props {
     employeeId: string
     view: 'payable' | 'paid'
   }
+  loadMoreExpensesHref?: string | null
+  loadMoreBatchesHref?: string | null
 }
 
 const inp: React.CSSProperties = {
@@ -90,6 +92,8 @@ export function ReimburseReportClient({
   employees,
   batches,
   initialFilters,
+  loadMoreExpensesHref = null,
+  loadMoreBatchesHref = null,
 }: Props) {
   const router = useRouter()
   const [selected, setSelected] = useState<Record<string, boolean>>({})
@@ -825,6 +829,13 @@ export function ReimburseReportClient({
               Dipilih: {selectedIds.length} · {formatIDR(selectedTotal)}
             </span>
           </div>
+          {loadMoreExpensesHref && (
+            <div style={{ marginTop: '10px', textAlign: 'center' }}>
+              <a href={loadMoreExpensesHref} style={{ fontSize: '12px', color: '#334155', textDecoration: 'none' }}>
+                Muat expense berikutnya
+              </a>
+            </div>
+          )}
         </div>
       )}
 
@@ -937,6 +948,13 @@ export function ReimburseReportClient({
               </tbody>
             </table>
           </div>
+          {loadMoreExpensesHref && (
+            <div style={{ marginTop: '10px', textAlign: 'center' }}>
+              <a href={loadMoreExpensesHref} style={{ fontSize: '12px', color: '#334155', textDecoration: 'none' }}>
+                Muat expense berikutnya
+              </a>
+            </div>
+          )}
         </div>
       )}
 
@@ -1048,6 +1066,13 @@ export function ReimburseReportClient({
             </tbody>
           </table>
         </div>
+        {loadMoreBatchesHref && (
+          <div style={{ marginTop: '10px', textAlign: 'center' }}>
+            <a href={loadMoreBatchesHref} style={{ fontSize: '12px', color: '#334155', textDecoration: 'none' }}>
+              Muat batch berikutnya
+            </a>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatIDR } from '@/lib/decimal'
 import { rpcBulkProcessApproval, rpcProcessApproval } from '@/lib/actions/approval.actions'
+import { createClient } from '@/supabase/client'
 import { SortableTh, StaticTh } from '@/components/sortable-th'
 import type { ColumnSortState } from '@/lib/table-sort'
 import {
@@ -37,9 +38,11 @@ interface Props {
   rows: ApprovalInboxRow[]
   /** embedded = di dalam Dashboard (heading lebih ringkas) */
   variant?: 'page' | 'embedded'
+  myEmployeeId?: string | null
+  loadMoreHref?: string | null
 }
 
-export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
+export function ApprovalsInboxClient({ rows, variant = 'page', myEmployeeId = null, loadMoreHref = null }: Props) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +54,34 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
   const [rejectModal, setRejectModal] = useState<{ ids: string[] } | null>(null)
   const [rejectNotes, setRejectNotes] = useState('')
   const [tableSort, setTableSort] = useState<ColumnSortState>({ key: null, dir: 'asc' })
+
+  // Realtime inbox refresh (debounced) for new/updated approvals.
+  useEffect(() => {
+    if (!myEmployeeId) return
+    const supabase = createClient()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => router.refresh(), 500)
+    }
+    const channel = supabase
+      .channel(`approvals-inbox-${myEmployeeId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'expense_approvals',
+          filter: `approver_employee_id=eq.${myEmployeeId}`,
+        },
+        scheduleRefresh
+      )
+      .subscribe()
+    return () => {
+      if (timer) clearTimeout(timer)
+      void supabase.removeChannel(channel)
+    }
+  }, [myEmployeeId, router])
 
   const toggleSortColumn = useCallback((key: string) => {
     setTableSort(s => cycleColumnSort(s, key))
@@ -370,6 +401,24 @@ export function ApprovalsInboxClient({ rows, variant = 'page' }: Props) {
           <div style={{ padding: '40px', textAlign: 'center', color: '#94A3B8', fontSize: '14px' }}>Tidak ada approval pending</div>
         )}
       </div>
+      {loadMoreHref && (
+        <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'center' }}>
+          <a
+            href={loadMoreHref}
+            style={{
+              padding: '8px 14px',
+              fontSize: '12px',
+              borderRadius: '8px',
+              border: '1px solid #CBD5E1',
+              color: '#334155',
+              textDecoration: 'none',
+              background: '#fff',
+            }}
+          >
+            Muat approval berikutnya
+          </a>
+        </div>
+      )}
 
       {selectedIds.length > 0 && (
         <div

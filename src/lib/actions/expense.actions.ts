@@ -64,6 +64,13 @@ function parseSubmitExpenseRpc(data: unknown): { ok: true; status: string; messa
   return { ok: true, status: row.status ?? '', message: row.message ?? '' }
 }
 
+function parseCreateSubmitRpc(data: unknown): { ok: true; id: string; ref_no: string | null; status: string; message: string } | { ok: false; error: string } {
+  const row = data as { success?: boolean; message?: string; status?: string; id?: string; ref_no?: string | null }
+  if (row.success === false) return { ok: false, error: row.message ?? 'Gagal membuat expense' }
+  if (!row.id) return { ok: false, error: 'Respons create expense tidak valid' }
+  return { ok: true, id: row.id, ref_no: row.ref_no ?? null, status: row.status ?? '', message: row.message ?? '' }
+}
+
 // ─── Fungsi utama: insertExpense ──────────────────────────────
 
 /**
@@ -84,44 +91,28 @@ export async function insertExpense(
     return { success: false, error: 'Sesi tidak valid. Silakan login kembali.' }
   }
 
-  const { data, error } = await supabase
-    .from('expenses')
-    .insert({
-      ...payload,
-      // Pastikan nilai kosong dikonversi ke '0' bukan null
-      vat: payload.vat ?? '0',
-      admin_fee: payload.admin_fee ?? '0',
-      service_fee: payload.service_fee ?? '0',
-      status: 'Draft',
-      created_by: user.id,
-    })
-    .select('id, ref_no')
-    .single()
-
-  if (error) {
-    console.error('[insertExpense]', error)
-    return {
-      success: false,
-      error: error.message ?? 'Gagal menyimpan data. Coba lagi.',
-    }
+  const payloadRpc = {
+    ...payload,
+    vat: payload.vat ?? '0',
+    admin_fee: payload.admin_fee ?? '0',
+    service_fee: payload.service_fee ?? '0',
   }
-
-  const { data: submitData, error: submitErr } = await supabase.rpc('submit_expense', { p_expense_id: data.id })
-  if (submitErr) {
-    await supabase.from('expenses').delete().eq('id', data.id)
-    return { success: false, error: submitErr.message }
+  const { data: createSubmitData, error: createSubmitErr } = await supabase.rpc('create_and_submit_expense', {
+    p_payload: payloadRpc,
+  })
+  if (createSubmitErr) {
+    return { success: false, error: createSubmitErr.message }
   }
-  const parsed = parseSubmitExpenseRpc(submitData)
+  const parsed = parseCreateSubmitRpc(createSubmitData)
   if (!parsed.ok) {
-    await supabase.from('expenses').delete().eq('id', data.id)
     return { success: false, error: parsed.error }
   }
 
   return {
     success: true,
     data: {
-      id: data.id,
-      ref_no: data.ref_no,
+      id: parsed.id,
+      ref_no: parsed.ref_no,
       status: parsed.status,
       message: parsed.message,
     },
@@ -346,7 +337,7 @@ export async function updateExpense(
 
   const { data: row, error: fetchErr } = await supabase
     .from('expenses')
-    .select('created_by, status')
+    .select('created_by, status, updated_at')
     .eq('id', id)
     .single()
 
@@ -368,7 +359,10 @@ export async function updateExpense(
 
   if (error) return { success: false, error: error.message }
 
-  const { data: submitData, error: submitErr } = await supabase.rpc('submit_expense', { p_expense_id: id })
+  const { data: submitData, error: submitErr } = await supabase.rpc('submit_expense', {
+    p_expense_id: id,
+    p_expected_updated_at: row.updated_at,
+  })
   if (submitErr) return { success: false, error: submitErr.message }
   const parsed = parseSubmitExpenseRpc(submitData)
   if (!parsed.ok) return { success: false, error: parsed.error }

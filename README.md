@@ -40,4 +40,17 @@ VALUES ('Nama Anda', 'email@anda.com', 0, 'owner', 'Active');
 npm run dev
 ```
 
+## Schema-Types Guard (recommended)
+
+Before opening PR, run:
+```bash
+npm run db:typegen
+npm run db:typecheck
+```
+
+This checks:
+- migration/schema drift via `supabase db diff --local`
+- generated types freshness in `src/supabase/database.types.ts`
+- critical Zod expense fields sync (`category_id`, `vendor_id`, `business_unit`, etc.)
+
 Lihat `DEPLOY_CHECKLIST.md` untuk panduan deploy ke Railway.
