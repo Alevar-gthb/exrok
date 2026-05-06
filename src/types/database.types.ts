@@ -23,6 +23,7 @@ export type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE'
 
 export interface Employee {
   id: string                  // UUID
+  auth_user_id: string | null
   full_name: string
   email: string | null
   salary_amount: string       // NUMERIC(15,2) → string untuk presisi

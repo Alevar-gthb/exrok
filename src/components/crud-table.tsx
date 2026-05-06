@@ -8,7 +8,7 @@ import { useState } from 'react'
 export interface CrudField {
   key: string
   label: string
-  type?: 'text' | 'select' | 'textarea' | 'date'
+  type?: 'text' | 'select' | 'textarea' | 'date' | 'password'
   options?: string[]
   required?: boolean
   placeholder?: string
@@ -43,6 +43,7 @@ interface CrudTableProps {
   sort?: CrudTableSort
   /** Jika true, tombol Hapus dinonaktifkan untuk baris tersebut. */
   deleteDisabled?: (row: Record<string, any>) => boolean
+  children?: React.ReactNode
 }
 
 const S = {
@@ -61,6 +62,7 @@ export function CrudTable({
   showDelete = true,
   sort,
   deleteDisabled,
+  children,
 }: CrudTableProps) {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Record<string, any> | null>(null)
@@ -124,6 +126,8 @@ export function CrudTable({
                     <textarea value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={{ ...S.inp, resize: 'none' }} rows={2} placeholder={f.placeholder} required={f.required} />
                   ) : f.type === 'date' ? (
                     <input type="date" value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={S.inp} required={f.required} />
+                  ) : f.type === 'password' ? (
+                    <input type="password" value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={S.inp} placeholder={f.placeholder} required={f.required} />
                   ) : (
                     <input type="text" value={form[f.key] ?? ''} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={S.inp} placeholder={f.placeholder} required={f.required} />
                   )}
@@ -252,6 +256,7 @@ export function CrudTable({
           </div>
         )}
       </div>
+      {children}
     </div>
   )
 }

@@ -13,7 +13,7 @@ Ikuti urutan ini secara tepat. Jangan lompat langkah.
    NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
    SUPABASE_SERVICE_ROLE_KEY=eyJhbGci...
-   NEXT_PUBLIC_APP_URL=https://your-app.railway.app
+   NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
   ```
 
 ---
@@ -44,8 +44,8 @@ supabase/migrations/003_audit_triggers.sql
 
 1. Dashboard → **Authentication → Providers** → pastikan **Email** enabled
 2. Dashboard → **Authentication → URL Configuration**:
-  - Site URL: `https://your-app.railway.app`
-  - Redirect URLs tambahkan: `https://your-app.railway.app/auth/callback`
+  - Site URL: `https://your-app.vercel.app`
+  - Redirect URLs tambahkan: `https://your-app.vercel.app/auth/callback`
 
 ---
 
@@ -106,24 +106,36 @@ npm run dev
 
 ---
 
-## STEP 7 · Deploy ke Railway
+## STEP 7 · Deploy ke Vercel
+
+### Opsi A — Auto-deploy dari GitHub (disarankan)
+
+1. Push ke GitHub (`Alevar-gthb/exrok`). Branch default (mis. `main`) terhubung ke Vercel akan memicu production deploy otomatis.
+2. Di **Vercel Dashboard** → project **exrok** (team `alevar-gthbs-projects`) → **Settings → Environment Variables**, set untuk environment **Production** (dan **Preview** bila perlu):
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `NEXT_PUBLIC_APP_URL` — URL production Vercel, mis. `https://exrok.vercel.app` atau custom domain
+  - `CRON_SECRET` — dipakai oleh `app/api/cron/payroll/route.ts`
+  - `ANTHROPIC_API_KEY` — dipakai oleh `app/api/ocr/receipt/route.ts`
+3. Tunggu build selesai (~2–3 menit). Vercel mendeteksi Next.js secara default; **tidak perlu** `vercel.json` untuk build standar.
+
+### Opsi B — CLI (lokal)
 
 ```bash
-# 1. Push ke GitHub
-git add . && git commit -m "feat: Exrok MVP" && git push
+npm i -g vercel
+# Sekali per folder: link ke project Vercel (repo ini biasanya sudah punya folder .vercel/ ter-link ke project exrok)
+vercel link
 
-# 2. Buka https://railway.app → New Project → Deploy from GitHub
-# 3. Pilih repository Exrok
-# 4. Railway auto-detect Next.js
+# Set env (contoh; ulangi per nama variabel)
+vercel env add NEXT_PUBLIC_SUPABASE_URL production
+# ... dst.
 
-# 5. Set environment variables di Railway:
-#    NEXT_PUBLIC_SUPABASE_URL
-#    NEXT_PUBLIC_SUPABASE_ANON_KEY
-#    SUPABASE_SERVICE_ROLE_KEY
-#    NEXT_PUBLIC_APP_URL  (isi URL Railway yang digenerate)
-
-# 6. Deploy → tunggu build selesai (~2-3 menit)
+# Deploy production manual
+vercel --prod
 ```
+
+Atau set variabel lewat Dashboard lalu jalankan hanya `vercel --prod`.
 
 ---
 

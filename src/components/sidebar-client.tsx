@@ -123,7 +123,7 @@ const NAV: NavItem[] = [
     id: 'settings',
     href: '/settings/vendors',
     label: 'Pengaturan',
-    roles: ['owner', 'finance', 'ga'],
+    roles: ['owner', 'finance', 'ga', 'staff'],
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5"/>
@@ -131,6 +131,7 @@ const NAV: NavItem[] = [
       </svg>
     ),
     children: [
+      { href: '/settings/security', label: 'Keamanan akun', roles: ['owner', 'finance', 'ga', 'staff'] },
       { href: '/settings/vendors', label: 'Vendor', roles: ['owner', 'finance', 'ga'] },
       { href: '/settings/petty-cash-wallet', label: 'Petty Cash Wallet', roles: ['owner', 'finance'] },
       { href: '/settings/projects', label: 'Project List', roles: ['owner'] },
