@@ -3,6 +3,7 @@ import { redirect, notFound } from 'next/navigation'
 import { ExpenseForm } from '@/components/expense-form'
 import type { ExpenseFormValues } from '@/lib/validations/expense.schema'
 import type { Expense } from '@/types/database.types'
+import { fetchMySessionEmployee } from '@/lib/employee-session'
 
 export const metadata = { title: 'Edit Expense | Exrok' }
 
@@ -12,6 +13,8 @@ export default async function EditExpensePage({ params }: { params: { id: string
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+  const me = await fetchMySessionEmployee(supabase)
+  const canViewPettyCashBalance = Boolean(me?.role && ['owner', 'finance'].includes(me.role))
 
   const { data: expense, error } = await supabase.from('expenses').select('*').eq('id', params.id).single()
 
@@ -21,13 +24,20 @@ export default async function EditExpensePage({ params }: { params: { id: string
     redirect(`/expenses/${params.id}`)
   }
 
-  const [{ data: projects }, { data: employees }, { data: categories }, { data: subcategories }, { data: vendors }] = await Promise.all([
+  const [{ data: projects }, { data: employees }, { data: categories }, { data: subcategories }, { data: vendors }, walletBalanceRpc] = await Promise.all([
     supabase.from('projects').select('id, name, client_name, status').eq('status', 'Active').order('name'),
     supabase.from('employees').select('id, full_name, email, nip, job_title, role, status, created_at').eq('status', 'Active').order('full_name'),
     supabase.from('expense_categories').select('id, name').order('name'),
     supabase.from('expense_subcategories').select('id, category_id, name').order('name'),
     supabase.from('vendors').select('id, name').order('name'),
+    canViewPettyCashBalance ? supabase.rpc('get_petty_cash_balance') : Promise.resolve({ data: null }),
   ])
+  const walletBalance =
+    walletBalanceRpc && typeof walletBalanceRpc === 'object' && 'data' in walletBalanceRpc
+      ? ((walletBalanceRpc.data as { success?: boolean; balance?: string | number } | null)?.success
+          ? String((walletBalanceRpc.data as { balance?: string | number }).balance ?? '0')
+          : null)
+      : null
 
   const row = expense as Expense
 
@@ -65,6 +75,8 @@ export default async function EditExpensePage({ params }: { params: { id: string
       expenseId={params.id}
       initialValues={initialValues}
       existingDocumentUrl={expense.document_url}
+      canViewPettyCashBalance={canViewPettyCashBalance}
+      pettyCashMaxAmount={walletBalance}
     />
   )
 }

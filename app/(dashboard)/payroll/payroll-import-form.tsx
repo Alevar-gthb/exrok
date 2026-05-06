@@ -13,6 +13,7 @@ export function PayrollImportForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<PayrollImportSummary | null>(null)
+  const [pendingUnknownProjects, setPendingUnknownProjects] = useState<string[]>([])
   const [jobId, setJobId] = useState<string | null>(null)
   const [progress, setProgress] = useState<{
     status: string
@@ -23,6 +24,9 @@ export function PayrollImportForm() {
   } | null>(null)
 
   const topIssues = useMemo(() => summary?.issues.slice(0, 12) ?? [], [summary])
+  const componentMappings = useMemo(() => summary?.componentMappings ?? [], [summary])
+  const autoCreatedMappings = useMemo(() => componentMappings.filter(m => m.autoCreated), [componentMappings])
+  const matchedMappings = useMemo(() => componentMappings.filter(m => !m.autoCreated), [componentMappings])
 
   useEffect(() => {
     if (!jobId) return
@@ -54,11 +58,11 @@ export function PayrollImportForm() {
     }
   }, [jobId])
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function submitImport(autoCreateProjects: boolean, overrideMode?: 'dry-run' | 'commit') {
     setError(null)
     setSummary(null)
     setProgress(null)
+    setPendingUnknownProjects([])
     if (!file) {
       setError('Pilih file Excel dulu.')
       return
@@ -69,8 +73,10 @@ export function PayrollImportForm() {
     setJobId(generatedJobId)
     form.append('file', file)
     form.append('year', year)
-    form.append('mode', mode)
+    const modeToSend = overrideMode ?? mode
+    form.append('mode', modeToSend)
     form.append('mismatchTolerance', tolerance)
+    form.append('autoCreateProjects', autoCreateProjects ? 'true' : 'false')
     form.append('job_id', generatedJobId)
 
     try {
@@ -79,13 +85,24 @@ export function PayrollImportForm() {
       if (!res.ok || !json.success) {
         throw new Error(json.error ?? 'Gagal import payroll')
       }
-      setSummary(json.data as PayrollImportSummary)
+      const nextSummary = json.data as PayrollImportSummary
+      setSummary(nextSummary)
+      if (nextSummary.unknownProjects?.length) {
+        setPendingUnknownProjects(nextSummary.unknownProjects)
+      } else {
+        setPendingUnknownProjects([])
+      }
       if (json.jobId) setJobId(String(json.jobId))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Terjadi kesalahan')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await submitImport(false)
   }
 
   return (
@@ -144,6 +161,23 @@ export function PayrollImportForm() {
       </div>
 
       {error && <p style={{ marginTop: 10, marginBottom: 0, fontSize: '12px', color: '#B91C1C' }}>{error}</p>}
+      {pendingUnknownProjects.length > 0 && (
+        <div style={{ marginTop: 10, padding: 12, border: '1px solid #F59E0B', borderRadius: 10, background: '#FFFBEB' }}>
+          <p style={{ margin: 0, fontSize: '12px', color: '#92400E', fontWeight: 600 }}>
+            Project baru terdeteksi ({pendingUnknownProjects.length}) - perlu konfirmasi untuk ditambahkan ke master data:
+          </p>
+          <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {pendingUnknownProjects.map(name => (
+              <span key={name} style={{ fontSize: '12px', color: '#78350F', background: '#FEF3C7', border: '1px solid #FCD34D', padding: '2px 8px', borderRadius: 999 }}>
+                {name}
+              </span>
+            ))}
+          </div>
+          <button type="button" disabled={loading} style={{ ...btnPrimary, marginTop: 10, background: '#1D4ED8' }} onClick={() => void submitImport(true, 'commit')}>
+            Buat Project & lanjutkan import
+          </button>
+        </div>
+      )}
       {progress && (
         <div style={{ marginTop: 10, fontSize: '12px', color: '#334155' }}>
           <strong>Status:</strong> {progress.status} · <strong>Stage:</strong> {progress.stage}
@@ -166,6 +200,52 @@ export function PayrollImportForm() {
             <span>Errors: {summary.errors}</span>
             <span>Mismatch: {summary.mismatchCount}</span>
           </div>
+          {componentMappings.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#0F172A', marginBottom: 6 }}>
+                Pencocokan kolom komponen
+                {autoCreatedMappings.length > 0 && (
+                  <span style={{ marginLeft: 6, color: '#92400E', fontWeight: 500 }}>
+                    ({autoCreatedMappings.length} otomatis dibuat)
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {matchedMappings.map((m, idx) => (
+                  <span
+                    key={`m-${idx}`}
+                    title={`${m.header} → ${m.code} (${m.label})`}
+                    style={{
+                      fontSize: '11px',
+                      padding: '3px 8px',
+                      borderRadius: 999,
+                      background: '#ECFDF5',
+                      color: '#065F46',
+                      border: '1px solid #A7F3D0',
+                    }}
+                  >
+                    {m.header} → {m.code}
+                  </span>
+                ))}
+                {autoCreatedMappings.map((m, idx) => (
+                  <span
+                    key={`a-${idx}`}
+                    title={`${m.header} → ${m.code} (auto-created)`}
+                    style={{
+                      fontSize: '11px',
+                      padding: '3px 8px',
+                      borderRadius: 999,
+                      background: '#FFFBEB',
+                      color: '#92400E',
+                      border: '1px solid #FCD34D',
+                    }}
+                  >
+                    {m.header} → {m.code} (baru)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {topIssues.length > 0 && (
             <div style={{ marginTop: 10, maxHeight: 220, overflow: 'auto', fontSize: '12px' }}>
               {topIssues.map((i, idx) => (

@@ -66,6 +66,79 @@ export async function updatePayrollRunLine(
   return { success: true }
 }
 
+function splitAmountEvenly(totalAmount: number, parts: number): string[] {
+  if (parts <= 0) return []
+  const totalCents = Math.round(totalAmount * 100)
+  const base = Math.floor(totalCents / parts)
+  const remainder = totalCents - base * parts
+  return Array.from({ length: parts }, (_, idx) => ((base + (idx < remainder ? 1 : 0)) / 100).toFixed(2))
+}
+
+export async function updatePayrollEmployeeProjects(
+  runId: string,
+  employeeId: string,
+  projectIds: string[],
+  totalAmount?: string
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const gate = await assertPayrollRole(supabase)
+  if (!gate.ok) return { success: false, error: gate.error }
+
+  const { data: run } = await supabase.from('payroll_runs').select('status').eq('id', runId).single()
+  if (!run || run.status !== 'draft') return { success: false, error: 'Payroll sudah disubmit atau tidak ditemukan.' }
+
+  const { data: lines, error: lineError } = await supabase
+    .from('payroll_run_lines')
+    .select('*')
+    .eq('run_id', runId)
+    .eq('employee_id', employeeId)
+    .order('created_at')
+  if (lineError || !lines?.length) return { success: false, error: lineError?.message ?? 'Baris payroll karyawan tidak ditemukan.' }
+  if (lines.some(l => l.expense_id)) return { success: false, error: 'Tidak bisa ubah project karena expense sudah tercatat.' }
+
+  const normalizedProjects = [...new Set(projectIds.filter(Boolean))]
+  if (normalizedProjects.length) {
+    const { data: validProjects } = await supabase.from('projects').select('id').in('id', normalizedProjects)
+    const valid = new Set((validProjects ?? []).map(p => p.id))
+    const invalidCount = normalizedProjects.filter(id => !valid.has(id)).length
+    if (invalidCount > 0) return { success: false, error: 'Ada project yang tidak valid.' }
+  }
+
+  const targetProjects: Array<string | null> = normalizedProjects.length ? normalizedProjects : [null]
+  const baseLine = lines[0]
+  const currentTotal = lines.reduce((acc, line) => acc + Number(line.amount ?? 0), 0)
+  const nextTotal = totalAmount !== undefined ? Number(totalAmount) : currentTotal
+  if (!Number.isFinite(nextTotal) || nextTotal < 0) {
+    return { success: false, error: 'Nominal total tidak valid.' }
+  }
+  const splitAmounts = splitAmountEvenly(nextTotal, targetProjects.length)
+  const firstLineAdjustments = (baseLine.adjustments ?? []) as PayrollLineAdjustment[]
+
+  const { error: deleteError } = await supabase.from('payroll_run_lines').delete().eq('run_id', runId).eq('employee_id', employeeId)
+  if (deleteError) return { success: false, error: deleteError.message }
+
+  const payload = targetProjects.map((projectId, idx) => ({
+    run_id: runId,
+    employee_id: employeeId,
+    project_id: projectId,
+    amount: splitAmounts[idx],
+    base_amount: splitAmounts[idx],
+    adjustments: idx === 0 ? firstLineAdjustments : [],
+    components_snapshot: baseLine.components_snapshot,
+    gross_income: baseLine.gross_income,
+    ter_category: baseLine.ter_category,
+    ter_rate: baseLine.ter_rate,
+    pph21_excel: baseLine.pph21_excel,
+    pph21_system: baseLine.pph21_system,
+    pph21_gap: baseLine.pph21_gap,
+    expense_id: null,
+  }))
+
+  const { error: insertError } = await supabase.from('payroll_run_lines').insert(payload)
+  if (insertError) return { success: false, error: insertError.message }
+  return { success: true }
+}
+
 export async function recalcPayrollLineAmountFromAdjustments(lineId: string): Promise<ActionResult> {
   const supabase = await createClient()
   const gate = await assertPayrollRole(supabase)

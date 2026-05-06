@@ -1,13 +1,32 @@
 import ExcelJS from 'exceljs'
-import { PAYROLL_COMPONENT_COLUMN_MAP, PAYROLL_PROJECT_LIST_HEADER, PAYROLL_REQUIRED_HEADERS } from '@/lib/payroll-import/mapping'
+import { PAYROLL_PROJECT_LIST_HEADER, PAYROLL_REQUIRED_HEADERS } from '@/lib/payroll-import/mapping'
 import { computePph21System, deriveTerCategory, pickTerRate, shouldApplyTerMonthly } from '@/lib/payroll-import/ter'
-import type { PayrollImportIssue, PayrollImportMode, PayrollImportSummary } from '@/types/payroll-import'
+import type {
+  PayrollComponentMapping,
+  PayrollImportIssue,
+  PayrollImportMode,
+  PayrollImportSummary,
+} from '@/types/payroll-import'
 
 type SheetPeriod = { year: number; month: number }
+
+type ComponentTemplate = {
+  id: string
+  code: string
+  label: string
+  kind: 'earning' | 'deduction'
+  excelAliases: string[]
+}
+
+type ComponentMap = {
+  byNormalizedHeader: Map<string, ComponentTemplate>
+  byCode: Map<string, ComponentTemplate>
+}
 
 type ParsedRow = {
   rowNumber: number
   npwp: string | null
+  nip: string | null
   fullName: string
   taxStatus: string | null
   ptkpStatus: string | null
@@ -20,6 +39,8 @@ type ParsedRow = {
   componentValues: Record<string, number>
   projectNames: string[]
 }
+
+type ProjectLookup = Map<string, { id: string; name: string }>
 
 const SHEET_MONTH: Record<string, number> = {
   JAN: 1,
@@ -35,6 +56,27 @@ const SHEET_MONTH: Record<string, number> = {
   NOV: 11,
   DEC: 12,
 }
+
+/**
+ * Header yang dipakai untuk metadata baris (identitas, gross, tax) dan tidak
+ * pernah menjadi komponen gaji. Header lain di `PAYROLL_REQUIRED_HEADERS`
+ * (mis. "PPh 21") tetap boleh juga dipetakan sebagai komponen via alias.
+ */
+const NON_COMPONENT_HEADERS_NORMALIZED = new Set<string>(
+  [
+    'NPWP',
+    'NIP',
+    'Nama Pegawai',
+    'Status Pajak',
+    'Status PTKP',
+    'Penghasilan Bruto',
+    'Kategori TER',
+    'TER',
+    'THP',
+    'Transfer',
+    PAYROLL_PROJECT_LIST_HEADER,
+  ].map(h => normalizeHeader(h))
+)
 
 function readCellValue(v: unknown): unknown {
   if (v && typeof v === 'object' && 'result' in (v as Record<string, unknown>)) {
@@ -58,8 +100,30 @@ function toText(v: unknown): string {
   return String(v).trim()
 }
 
+function normalizeProjectName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function normalizeFullName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 function normalizeNpwp(raw: string): string {
   return raw.replace(/[^0-9]/g, '')
+}
+
+function normalizeHeader(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function headerToCode(header: string): string {
+  const cleaned = header
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .toUpperCase()
+  return cleaned.slice(0, 64)
 }
 
 function headersFromRow(row: ExcelJS.Row): Record<string, number> {
@@ -71,7 +135,51 @@ function headersFromRow(row: ExcelJS.Row): Record<string, number> {
   return map
 }
 
-function parseSheetRows(ws: ExcelJS.Worksheet, issues: PayrollImportIssue[]): ParsedRow[] {
+function emptyComponentMap(): ComponentMap {
+  return { byNormalizedHeader: new Map(), byCode: new Map() }
+}
+
+function indexComponent(map: ComponentMap, tpl: ComponentTemplate) {
+  map.byCode.set(tpl.code, tpl)
+  const keys = new Set<string>()
+  keys.add(normalizeHeader(tpl.code))
+  keys.add(normalizeHeader(tpl.label))
+  for (const alias of tpl.excelAliases) {
+    if (alias) keys.add(normalizeHeader(alias))
+  }
+  for (const key of keys) {
+    if (!key) continue
+    if (!map.byNormalizedHeader.has(key)) {
+      map.byNormalizedHeader.set(key, tpl)
+    }
+  }
+}
+
+async function loadComponentMap(supabase: any): Promise<ComponentMap> {
+  const { data, error } = await supabase
+    .from('salary_component_templates')
+    .select('id, code, label, kind, excel_aliases')
+  if (error) throw new Error(error.message)
+  const map = emptyComponentMap()
+  for (const row of data ?? []) {
+    const aliases = Array.isArray(row.excel_aliases) ? (row.excel_aliases as string[]) : []
+    indexComponent(map, {
+      id: row.id,
+      code: row.code,
+      label: row.label,
+      kind: row.kind === 'deduction' ? 'deduction' : 'earning',
+      excelAliases: aliases.filter((a): a is string => typeof a === 'string' && a.trim().length > 0),
+    })
+  }
+  return map
+}
+
+function parseSheetRows(
+  ws: ExcelJS.Worksheet,
+  issues: PayrollImportIssue[],
+  componentMap: ComponentMap,
+  unknownHeaders: Map<string, string>
+): ParsedRow[] {
   const headerRow = ws.getRow(1)
   const headerMap = headersFromRow(headerRow)
   for (const need of PAYROLL_REQUIRED_HEADERS) {
@@ -86,6 +194,22 @@ function parseSheetRows(ws: ExcelJS.Worksheet, issues: PayrollImportIssue[]): Pa
   }
   if (issues.some(x => x.level === 'error' && x.rowNumber === 1)) return []
 
+  const componentColumns: Array<{ header: string; column: number; code: string | null }> = []
+  for (const [header, column] of Object.entries(headerMap)) {
+    const normalized = normalizeHeader(header)
+    if (!normalized) continue
+    if (NON_COMPONENT_HEADERS_NORMALIZED.has(normalized)) continue
+    const tpl = componentMap.byNormalizedHeader.get(normalized)
+    if (tpl) {
+      componentColumns.push({ header, column, code: tpl.code })
+    } else {
+      componentColumns.push({ header, column, code: null })
+      if (!unknownHeaders.has(normalized)) {
+        unknownHeaders.set(normalized, header.replace(/\s+/g, ' ').trim())
+      }
+    }
+  }
+
   const parsed: ParsedRow[] = []
   for (let i = 2; i <= ws.rowCount; i += 1) {
     const row = ws.getRow(i)
@@ -93,12 +217,14 @@ function parseSheetRows(ws: ExcelJS.Worksheet, issues: PayrollImportIssue[]): Pa
     if (!fullName) continue
     const npwpRaw = toText(readCellValue(row.getCell(headerMap['NPWP']).value))
     const npwp = npwpRaw ? normalizeNpwp(npwpRaw) : null
+    const nip = headerMap['NIP'] ? toText(readCellValue(row.getCell(headerMap['NIP']).value)) || null : null
     const grossIncome = toNumber(readCellValue(row.getCell(headerMap['Penghasilan Bruto']).value))
     const componentValues: Record<string, number> = {}
-    for (const comp of PAYROLL_COMPONENT_COLUMN_MAP) {
-      const col = headerMap[comp.header]
-      if (!col) continue
-      componentValues[comp.code] = toNumber(readCellValue(row.getCell(col).value))
+    for (const comp of componentColumns) {
+      if (!comp.code) continue
+      const value = toNumber(readCellValue(row.getCell(comp.column).value))
+      const prev = componentValues[comp.code] ?? 0
+      componentValues[comp.code] = prev + value
     }
     const projectListColumn = headerMap[PAYROLL_PROJECT_LIST_HEADER]
     const projectListRaw = projectListColumn ? toText(readCellValue(row.getCell(projectListColumn).value)) : ''
@@ -106,10 +232,11 @@ function parseSheetRows(ws: ExcelJS.Worksheet, issues: PayrollImportIssue[]): Pa
       .split(',')
       .map(x => x.trim())
       .filter(Boolean)
-      .filter((name, idx, arr) => arr.findIndex(other => other.toLowerCase() === name.toLowerCase()) === idx)
+      .filter((name, idx, arr) => arr.findIndex(other => normalizeProjectName(other) === normalizeProjectName(name)) === idx)
     parsed.push({
       rowNumber: i,
       npwp,
+      nip,
       fullName,
       taxStatus: toText(readCellValue(row.getCell(headerMap['Status Pajak']).value)) || null,
       ptkpStatus: toText(readCellValue(row.getCell(headerMap['Status PTKP']).value)) || null,
@@ -145,31 +272,94 @@ async function fetchTerCards(supabase: any) {
   return out
 }
 
-async function ensureTemplates(
+async function autoCreateMissingTemplates(params: {
   supabase: any
-): Promise<Map<string, { id: string; kind: 'earning' | 'deduction' }>> {
-  const { data: existing } = await supabase.from('salary_component_templates').select('id, code, kind')
-  const byCode = new Map<string, { id: string; kind: 'earning' | 'deduction' }>()
-  for (const row of existing ?? []) byCode.set(row.code, { id: row.id, kind: row.kind })
-
-  const missing = PAYROLL_COMPONENT_COLUMN_MAP.filter(c => !byCode.has(c.code))
-  if (missing.length) {
-    const { data: inserted, error } = await supabase
-      .from('salary_component_templates')
-      .insert(
-        missing.map(m => ({
-          code: m.code,
-          label: m.label,
-          kind: m.kind,
-          is_active: true,
-          include_in_monthly_payroll: m.code.toUpperCase() !== 'THR',
-        }))
-      )
-      .select('id, code, kind')
-    if (error) throw new Error(error.message)
-    for (const row of inserted ?? []) byCode.set(row.code, { id: row.id, kind: row.kind })
+  unknownHeaders: Map<string, string>
+  componentMap: ComponentMap
+  trackMappings: PayrollComponentMapping[]
+}): Promise<number> {
+  const { supabase, unknownHeaders, componentMap, trackMappings } = params
+  if (!unknownHeaders.size) return 0
+  const inserts: Array<{
+    code: string
+    label: string
+    kind: 'earning' | 'deduction'
+    is_active: boolean
+    include_in_monthly_payroll: boolean
+    excel_aliases: string[]
+    sourceHeader: string
+  }> = []
+  const usedCodes = new Set<string>(componentMap.byCode.keys())
+  for (const [, header] of unknownHeaders) {
+    const baseCode = headerToCode(header) || `KOMPONEN_${usedCodes.size + 1}`
+    let code = baseCode
+    let suffix = 2
+    while (usedCodes.has(code)) {
+      code = `${baseCode}_${suffix}`
+      suffix += 1
+    }
+    usedCodes.add(code)
+    inserts.push({
+      code,
+      label: header,
+      kind: 'earning',
+      is_active: true,
+      include_in_monthly_payroll: true,
+      excel_aliases: [header],
+      sourceHeader: header,
+    })
   }
-  return byCode
+
+  const { data, error } = await supabase
+    .from('salary_component_templates')
+    .insert(inserts.map(({ sourceHeader: _ignored, ...payload }) => payload))
+    .select('id, code, label, kind, excel_aliases')
+  if (error) throw new Error(error.message)
+
+  for (let idx = 0; idx < (data ?? []).length; idx += 1) {
+    const row = data![idx]
+    const sourceHeader = inserts[idx]?.sourceHeader ?? row.label
+    const aliases = Array.isArray(row.excel_aliases) ? (row.excel_aliases as string[]) : []
+    const tpl: ComponentTemplate = {
+      id: row.id,
+      code: row.code,
+      label: row.label,
+      kind: row.kind === 'deduction' ? 'deduction' : 'earning',
+      excelAliases: aliases.filter((a): a is string => typeof a === 'string' && a.length > 0),
+    }
+    indexComponent(componentMap, tpl)
+    trackMappings.push({ header: sourceHeader, code: tpl.code, label: tpl.label, autoCreated: true })
+  }
+  return inserts.length
+}
+
+function buildMatchedMappings(params: {
+  workbook: ExcelJS.Workbook
+  componentMap: ComponentMap
+}): PayrollComponentMapping[] {
+  const { workbook, componentMap } = params
+  const seen = new Set<string>()
+  const out: PayrollComponentMapping[] = []
+  for (const ws of workbook.worksheets) {
+    const month = SHEET_MONTH[ws.name.trim().toUpperCase()]
+    if (!month) continue
+    const headerMap = headersFromRow(ws.getRow(1))
+    for (const header of Object.keys(headerMap)) {
+      const normalized = normalizeHeader(header)
+      if (!normalized || NON_COMPONENT_HEADERS_NORMALIZED.has(normalized)) continue
+      if (seen.has(normalized)) continue
+      const tpl = componentMap.byNormalizedHeader.get(normalized)
+      if (!tpl) continue
+      seen.add(normalized)
+      out.push({
+        header: header.replace(/\s+/g, ' ').trim(),
+        code: tpl.code,
+        label: tpl.label,
+        autoCreated: false,
+      })
+    }
+  }
+  return out
 }
 
 async function upsertEmployee(
@@ -187,12 +377,49 @@ async function upsertEmployee(
       return { id: e1.id }
     }
   }
+  if (row.nip) {
+    const { data: e2 } = await supabase.from('employees').select('id').eq('nip', row.nip).maybeSingle()
+    if (e2) {
+      const { error } = await supabase
+        .from('employees')
+        .update({ full_name: row.fullName, tax_status: row.taxStatus, ptkp_status: row.ptkpStatus, status: 'Active' })
+        .eq('id', e2.id)
+      if (error) throw new Error(error.message)
+      return { id: e2.id }
+    }
+  }
+  const normalizedName = normalizeFullName(row.fullName)
+  const { data: byName, error: byNameError } = await supabase
+    .from('employees')
+    .select('id, full_name')
+    .ilike('full_name', row.fullName)
+  if (byNameError) throw new Error(byNameError.message)
+  const nameMatches = (byName ?? []).filter((candidate: { full_name: string | null }) => normalizeFullName(candidate.full_name ?? '') === normalizedName)
+  if (nameMatches.length > 1) {
+    throw new Error(`Nama karyawan ambigu (${row.fullName}) terdeteksi lebih dari satu record. Rapikan master employee dulu.`)
+  }
+  if (nameMatches.length === 1) {
+    const target = nameMatches[0]
+    const { error } = await supabase
+      .from('employees')
+      .update({
+        full_name: row.fullName,
+        npwp: row.npwp ?? undefined,
+        tax_status: row.taxStatus,
+        ptkp_status: row.ptkpStatus,
+        status: 'Active',
+      })
+      .eq('id', target.id)
+    if (error) throw new Error(error.message)
+    return { id: target.id }
+  }
 
   const { data: ins, error: insErr } = await supabase
     .from('employees')
     .insert({
       full_name: row.fullName,
       npwp: row.npwp,
+      nip: row.nip,
       tax_status: row.taxStatus ?? 'Gross',
       ptkp_status: row.ptkpStatus,
       status: 'Active',
@@ -281,22 +508,53 @@ async function upsertRun(
   return run.id
 }
 
-async function fetchProjectLookup(supabase: any): Promise<Map<string, { id: string; name: string }>> {
+async function fetchProjectLookup(supabase: any): Promise<ProjectLookup> {
   const { data, error } = await supabase.from('projects').select('id, name')
   if (error) throw new Error(error.message)
-  const out = new Map<string, { id: string; name: string }>()
+  const out: ProjectLookup = new Map()
   for (const row of data ?? []) {
     const name = toText(row.name)
     if (!name) continue
-    out.set(name.toLowerCase(), { id: row.id, name })
+    out.set(normalizeProjectName(name), { id: row.id, name })
   }
   return out
+}
+
+function collectUnknownProjects(rows: ParsedRow[], projectsByName: ProjectLookup): string[] {
+  const out = new Map<string, string>()
+  for (const row of rows) {
+    for (const name of row.projectNames) {
+      const key = normalizeProjectName(name)
+      if (!key || projectsByName.has(key) || out.has(key)) continue
+      out.set(key, name.trim().replace(/\s+/g, ' '))
+    }
+  }
+  return [...out.values()]
+}
+
+async function createMissingProjects(params: { supabase: any; unknownProjects: string[] }) {
+  const { supabase, unknownProjects } = params
+  if (!unknownProjects.length) return
+  const refreshed = await fetchProjectLookup(supabase)
+  const toInsert = unknownProjects
+    .map(name => name.trim().replace(/\s+/g, ' '))
+    .filter(name => name && !refreshed.has(normalizeProjectName(name)))
+  if (!toInsert.length) return
+  const { error } = await supabase.from('projects').insert(
+    toInsert.map(name => ({
+      name,
+      client_name: null,
+      status: 'Active',
+    }))
+  )
+  if (error) throw new Error(error.message)
 }
 
 export async function importPayrollWorkbook(params: {
   supabase: any
   fileBuffer: any
   mode: PayrollImportMode
+  autoCreateProjects?: boolean
   year: number
   userId: string | null
   mismatchTolerance: number
@@ -314,13 +572,13 @@ export async function importPayrollWorkbook(params: {
     errors: number
   }) => Promise<void> | void
 }): Promise<PayrollImportSummary> {
-  const { supabase, fileBuffer, mode, year, userId, mismatchTolerance, onProgress } = params
+  const { supabase, fileBuffer, mode, autoCreateProjects, year, userId, mismatchTolerance, onProgress } = params
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer as any)
   const issues: PayrollImportIssue[] = []
   const terCards = await fetchTerCards(supabase)
-  const templateMap = await ensureTemplates(supabase)
-  const projectsByName = await fetchProjectLookup(supabase)
+  const componentMap = await loadComponentMap(supabase)
+  let projectsByName = await fetchProjectLookup(supabase)
 
   let rowsProcessed = 0
   let employeesUpserted = 0
@@ -328,6 +586,7 @@ export async function importPayrollWorkbook(params: {
   let payrollLinesUpserted = 0
   let mismatchCount = 0
   let sheetsProcessed = 0
+  const componentMappings: PayrollComponentMapping[] = []
   const publishProgress = async (status: 'running' | 'completed' | 'failed', stage: string, message?: string) => {
     if (!onProgress) return
     await onProgress({
@@ -347,13 +606,90 @@ export async function importPayrollWorkbook(params: {
 
   await publishProgress('running', 'workbook_loaded', 'Workbook berhasil dibaca')
 
+  const unknownHeaders = new Map<string, string>()
+  const rowsPerSheet = new Map<string, ParsedRow[]>()
+  for (const ws of workbook.worksheets) {
+    const month = SHEET_MONTH[ws.name.trim().toUpperCase()]
+    if (!month) continue
+    const parsedRows = parseSheetRows(ws, issues, componentMap, unknownHeaders)
+    rowsPerSheet.set(ws.name, parsedRows)
+  }
+
+  if (mode === 'commit' && unknownHeaders.size) {
+    await autoCreateMissingTemplates({ supabase, unknownHeaders, componentMap, trackMappings: componentMappings })
+    // Re-populate componentValues untuk header yang baru dikenali setelah auto-create.
+    for (const ws of workbook.worksheets) {
+      const month = SHEET_MONTH[ws.name.trim().toUpperCase()]
+      if (!month) continue
+      const headerMap = headersFromRow(ws.getRow(1))
+      const newlyMappedColumns: Array<{ column: number; code: string }> = []
+      for (const [header, column] of Object.entries(headerMap)) {
+        const normalized = normalizeHeader(header)
+        if (!normalized || NON_COMPONENT_HEADERS_NORMALIZED.has(normalized)) continue
+        if (!unknownHeaders.has(normalized)) continue
+        const tpl = componentMap.byNormalizedHeader.get(normalized)
+        if (!tpl) continue
+        newlyMappedColumns.push({ column, code: tpl.code })
+      }
+      if (!newlyMappedColumns.length) continue
+      const parsedRows = rowsPerSheet.get(ws.name) ?? []
+      for (const parsed of parsedRows) {
+        const row = ws.getRow(parsed.rowNumber)
+        for (const t of newlyMappedColumns) {
+          const value = toNumber(readCellValue(row.getCell(t.column).value))
+          parsed.componentValues[t.code] = (parsed.componentValues[t.code] ?? 0) + value
+        }
+      }
+    }
+  } else if (mode === 'dry-run' && unknownHeaders.size) {
+    for (const [, header] of unknownHeaders) {
+      issues.push({
+        rowNumber: 1,
+        employeeName: '-',
+        level: 'warning',
+        message: `Header "${header}" belum dipetakan ke komponen master. Komponen baru akan otomatis dibuat saat commit.`,
+      })
+      componentMappings.push({ header, code: '(akan dibuat)', label: header, autoCreated: true })
+    }
+  }
+
+  for (const matched of buildMatchedMappings({ workbook, componentMap })) {
+    if (componentMappings.some(m => m.code === matched.code && m.header === matched.header)) continue
+    componentMappings.push(matched)
+  }
+
+  const allRows = [...rowsPerSheet.values()].flat()
+  const unknownProjects = collectUnknownProjects(allRows, projectsByName)
+  if (mode === 'commit' && unknownProjects.length && !autoCreateProjects) {
+    await publishProgress('completed', 'awaiting_project_confirmation', 'Butuh konfirmasi tambah project baru')
+    return {
+      mode,
+      needsProjectConfirmation: true,
+      unknownProjects,
+      sheetsProcessed: 0,
+      rowsProcessed: 0,
+      employeesUpserted: 0,
+      componentsUpserted: 0,
+      payrollLinesUpserted: 0,
+      warnings: issues.filter(i => i.level === 'warning').length,
+      errors: issues.filter(i => i.level === 'error').length,
+      mismatchCount: 0,
+      issues: issues.slice(0, 200),
+      componentMappings,
+    }
+  }
+  if (mode === 'commit' && unknownProjects.length && autoCreateProjects) {
+    await createMissingProjects({ supabase, unknownProjects })
+    projectsByName = await fetchProjectLookup(supabase)
+  }
+
   for (const ws of workbook.worksheets) {
     const month = SHEET_MONTH[ws.name.trim().toUpperCase()]
     if (!month) continue
     sheetsProcessed += 1
     await publishProgress('running', 'sheet_processing', `Memproses sheet ${ws.name}`)
     const period = { year, month }
-    const parsedRows = parseSheetRows(ws, issues)
+    const parsedRows = rowsPerSheet.get(ws.name) ?? []
     if (!parsedRows.length) continue
     let runId = ''
     if (mode === 'commit') runId = await upsertRun(supabase, period, userId)
@@ -384,7 +720,7 @@ export async function importPayrollWorkbook(params: {
           })
         }
 
-        const invalidProjectNames = row.projectNames.filter(name => !projectsByName.has(name.toLowerCase()))
+        const invalidProjectNames = row.projectNames.filter(name => !projectsByName.has(normalizeProjectName(name)))
         if (invalidProjectNames.length) {
           issues.push({
             rowNumber: row.rowNumber,
@@ -397,16 +733,15 @@ export async function importPayrollWorkbook(params: {
         if (mode === 'dry-run') continue
         const projectIds = row.projectNames.length
           ? row.projectNames
-              .map(name => projectsByName.get(name.toLowerCase())?.id ?? null)
+              .map(name => projectsByName.get(normalizeProjectName(name))?.id ?? null)
               .filter((id): id is string => Boolean(id))
           : [null]
 
         const emp = await upsertEmployee(supabase, row)
         employeesUpserted += 1
 
-        for (const mapping of PAYROLL_COMPONENT_COLUMN_MAP) {
-          const amount = row.componentValues[mapping.code] ?? 0
-          const tpl = templateMap.get(mapping.code)
+        for (const [code, amount] of Object.entries(row.componentValues)) {
+          const tpl = componentMap.byCode.get(code)
           if (!tpl || amount === 0) continue
           const { error } = await supabase.from('employee_salary_component_amounts').upsert(
             {
@@ -449,6 +784,8 @@ export async function importPayrollWorkbook(params: {
 
   return {
     mode,
+    needsProjectConfirmation: false,
+    unknownProjects,
     sheetsProcessed,
     rowsProcessed,
     employeesUpserted,
@@ -458,5 +795,6 @@ export async function importPayrollWorkbook(params: {
     errors: issues.filter(i => i.level === 'error').length,
     mismatchCount,
     issues: issues.slice(0, 200),
+    componentMappings,
   }
 }

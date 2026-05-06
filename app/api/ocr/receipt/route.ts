@@ -12,6 +12,21 @@ import { OcrApiResponse } from '@/types/ocr'
 const rateLimitMap = new Map<string, { count: number; reset: number }>()
 const OCR_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
 
+function logAnthropicHttpError(status: number, errBody: string) {
+  console.error('Claude API error:', status, errBody)
+  try {
+    const parsed = JSON.parse(errBody) as {
+      error?: { type?: string; message?: string }
+    }
+    const msg = parsed?.error?.message
+    if (msg) {
+      console.error('Claude API error detail:', parsed.error?.type ?? 'unknown', msg)
+    }
+  } catch {
+    /* body bukan JSON */
+  }
+}
+
 function checkRateLimit(userId: string): boolean {
   const now = Date.now()
   const entry = rateLimitMap.get(userId)
@@ -70,8 +85,37 @@ export async function POST(req: NextRequest): Promise<NextResponse<OcrApiRespons
     }
 
     const fileBuffer = Buffer.from(await file.arrayBuffer())
-    const imageBase64 = fileBuffer.toString('base64')
+    const dataBase64 = fileBuffer.toString('base64')
     const mimeType = file.type || 'image/jpeg'
+
+    const userContent: Array<
+      | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } }
+      | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+      | { type: 'text'; text: string }
+    > =
+      mimeType === 'application/pdf'
+        ? [
+            {
+              type: 'document',
+              source: {
+                type: 'base64',
+                media_type: 'application/pdf',
+                data: dataBase64,
+              },
+            },
+            { type: 'text', text: RECEIPT_OCR_PROMPT },
+          ]
+        : [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mimeType,
+                data: dataBase64,
+              },
+            },
+            { type: 'text', text: RECEIPT_OCR_PROMPT },
+          ]
 
     const anthropicKey = process.env.ANTHROPIC_API_KEY
     if (!anthropicKey) {
@@ -95,20 +139,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<OcrApiRespons
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'image',
-                source: {
-                  type: 'base64',
-                  media_type: mimeType,
-                  data: imageBase64,
-                },
-              },
-              {
-                type: 'text',
-                text: RECEIPT_OCR_PROMPT,
-              },
-            ],
+            content: userContent,
           },
         ],
       }),
@@ -116,7 +147,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<OcrApiRespons
 
     if (!claudeRes.ok) {
       const errBody = await claudeRes.text()
-      console.error('Claude API error:', claudeRes.status, errBody)
+      logAnthropicHttpError(claudeRes.status, errBody)
       return NextResponse.json(
         { success: false, error: 'Gagal menghubungi Claude API' },
         { status: 502 }

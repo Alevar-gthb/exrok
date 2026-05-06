@@ -7,6 +7,14 @@ export type ColumnComponentMap = {
   kind: ComponentKind
 }
 
+/**
+ * @deprecated Source of truth untuk mapping header Excel sekarang ada di kolom
+ * `excel_aliases` pada tabel `salary_component_templates`. List ini dipertahankan
+ * sebagai seed historis untuk migration `20260505230000_salary_component_excel_aliases.sql`
+ * dan sebagai referensi waktu dokumentasi. Importer payroll TIDAK lagi membaca
+ * konstanta ini — gunakan `loadComponentMap` di `src/lib/payroll-import/importer.ts`.
+ * Kelola alias komponen baru lewat halaman Settings → Salary Components.
+ */
 export const PAYROLL_COMPONENT_COLUMN_MAP: ColumnComponentMap[] = [
   { header: 'Gaji Pokok', code: 'BASE', label: 'Gaji pokok', kind: 'earning' },
   { header: 'Tunj Jabatan', code: 'TUNJ_JABATAN', label: 'Tunjangan jabatan', kind: 'earning' },

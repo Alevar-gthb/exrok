@@ -14,8 +14,17 @@ export type PayrollImportIssue = {
   message: string
 }
 
+export type PayrollComponentMapping = {
+  header: string
+  code: string
+  label: string
+  autoCreated: boolean
+}
+
 export type PayrollImportSummary = {
   mode: PayrollImportMode
+  needsProjectConfirmation?: boolean
+  unknownProjects?: string[]
   sheetsProcessed: number
   rowsProcessed: number
   employeesUpserted: number
@@ -25,4 +34,5 @@ export type PayrollImportSummary = {
   errors: number
   mismatchCount: number
   issues: PayrollImportIssue[]
+  componentMappings: PayrollComponentMapping[]
 }

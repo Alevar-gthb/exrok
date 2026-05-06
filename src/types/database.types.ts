@@ -180,6 +180,35 @@ export interface ReimbursementBatchItem {
 
 export type ReimbursementBatchItemInsert = Omit<ReimbursementBatchItem, 'id' | 'created_at'>
 
+export type PettyCashWalletEntryType = 'topup' | 'expense' | 'adjustment'
+
+export interface PettyCashWallet {
+  id: string
+  name: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type PettyCashWalletInsert = Omit<PettyCashWallet, 'id' | 'created_at' | 'updated_at'>
+export type PettyCashWalletUpdate = Partial<PettyCashWalletInsert>
+
+export interface PettyCashWalletEntry {
+  id: string
+  wallet_id: string
+  entry_type: PettyCashWalletEntryType
+  amount: string
+  balance_before: string
+  balance_after: string
+  reference_type: string | null
+  reference_id: string | null
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export type PettyCashWalletEntryInsert = Omit<PettyCashWalletEntry, 'id' | 'created_at'>
+
 // ─── HR & PAYROLL ────────────────────────────────────────────
 
 export interface EmployeeContract {
@@ -206,6 +235,8 @@ export interface SalaryComponentTemplate {
   is_active: boolean
   /** false = tidak masuk ringkasan gaji bulanan (mis. THR). */
   include_in_monthly_payroll: boolean
+  /** Header Excel yang dipetakan ke komponen ini (case-insensitive, whitespace-normalized). */
+  excel_aliases: string[]
   created_at: string
 }
 

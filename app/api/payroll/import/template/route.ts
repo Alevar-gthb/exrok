@@ -2,7 +2,13 @@ import ExcelJS from 'exceljs'
 import { NextResponse } from 'next/server'
 import { createClient } from '@/supabase/server'
 import { fetchMySessionEmployee } from '@/lib/employee-session'
-import { PAYROLL_COMPONENT_COLUMN_MAP, PAYROLL_REQUIRED_HEADERS, PAYROLL_PROJECT_LIST_HEADER } from '@/lib/payroll-import/mapping'
+import { PAYROLL_REQUIRED_HEADERS, PAYROLL_PROJECT_LIST_HEADER } from '@/lib/payroll-import/mapping'
+
+type ComponentTemplateRow = {
+  code: string
+  label: string
+  excel_aliases: string[] | null
+}
 
 type ProjectRef = { id: string; name: string | null }
 type LineRow = {
@@ -155,12 +161,24 @@ export async function GET() {
     }
   }
 
+  const { data: rawTemplates, error: templateErr } = await supabase
+    .from('salary_component_templates')
+    .select('code, label, excel_aliases')
+    .eq('is_active', true)
+    .order('code')
+  if (templateErr) return NextResponse.json({ success: false, error: templateErr.message }, { status: 500 })
+  const templates = (rawTemplates ?? []) as ComponentTemplateRow[]
+  const componentColumns = templates.map(t => {
+    const firstAlias = (t.excel_aliases ?? []).find(a => typeof a === 'string' && a.trim().length > 0)
+    return { code: t.code, header: (firstAlias ?? t.label).replace(/\s+/g, ' ').trim() }
+  })
+
   const workbook = new ExcelJS.Workbook()
   const monthName = new Date(Date.UTC(latestRun.period_year, latestRun.period_month - 1, 1))
     .toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })
     .toUpperCase()
   const sheet = workbook.addWorksheet(monthName)
-  const headers = [...PAYROLL_REQUIRED_HEADERS, PAYROLL_PROJECT_LIST_HEADER, ...PAYROLL_COMPONENT_COLUMN_MAP.map(c => c.header)]
+  const headers = [...PAYROLL_REQUIRED_HEADERS, PAYROLL_PROJECT_LIST_HEADER, ...componentColumns.map(c => c.header)]
   sheet.addRow(headers)
 
   for (const [employeeId, line] of linesByEmployee.entries()) {
@@ -179,7 +197,7 @@ export async function GET() {
       Transfer: toNumeric(line.amount),
       [PAYROLL_PROJECT_LIST_HEADER]: projectList,
     }
-    for (const comp of PAYROLL_COMPONENT_COLUMN_MAP) {
+    for (const comp of componentColumns) {
       rowValues[comp.header] = toNumeric(componentValues[comp.code])
     }
     sheet.addRow(headers.map(header => rowValues[header] ?? ''))

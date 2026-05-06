@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
     const yearRaw = String(form.get('year') ?? '').trim()
     const modeRaw = String(form.get('mode') ?? 'dry-run').trim()
     const toleranceRaw = String(form.get('mismatchTolerance') ?? '500')
+    const autoCreateProjectsRaw = String(form.get('autoCreateProjects') ?? 'false').trim()
     const jobIdRaw = String(form.get('job_id') ?? '').trim()
 
     if (!(file instanceof File)) {
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Tahun tidak valid.' }, { status: 400 })
     }
     const mode: PayrollImportMode = modeRaw === 'commit' ? 'commit' : 'dry-run'
+    const autoCreateProjects = autoCreateProjectsRaw === 'true'
     const mismatchTolerance = Number(toleranceRaw)
     jobId = jobIdRaw || crypto.randomUUID()
 
@@ -52,6 +54,7 @@ export async function POST(req: NextRequest) {
       supabase,
       fileBuffer: new Uint8Array(bytes),
       mode,
+      autoCreateProjects,
       year,
       userId: me.id,
       mismatchTolerance: Number.isFinite(mismatchTolerance) ? mismatchTolerance : 500,
@@ -79,8 +82,8 @@ export async function POST(req: NextRequest) {
       .from('payroll_import_jobs')
       .update({
         status: 'completed',
-        stage: 'completed',
-        message: 'Import payroll selesai',
+        stage: summary.needsProjectConfirmation ? 'awaiting_project_confirmation' : 'completed',
+        message: summary.needsProjectConfirmation ? 'Konfirmasi tambah project baru sebelum commit' : 'Import payroll selesai',
         sheets_processed: summary.sheetsProcessed,
         rows_processed: summary.rowsProcessed,
         employees_upserted: summary.employeesUpserted,

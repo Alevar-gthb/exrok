@@ -132,6 +132,7 @@ const NAV: NavItem[] = [
     ),
     children: [
       { href: '/settings/vendors', label: 'Vendor', roles: ['owner', 'finance', 'ga'] },
+      { href: '/settings/petty-cash-wallet', label: 'Petty Cash Wallet', roles: ['owner', 'finance'] },
       { href: '/settings/projects', label: 'Project List', roles: ['owner'] },
       { href: '/settings/salary-components', label: 'Komponen gaji', roles: ['owner', 'finance'] },
       { href: '/settings/approval-rules', label: 'Approval Rules', roles: ['owner', 'finance', 'ga', 'staff'] },

@@ -59,14 +59,34 @@ export async function createExpenseVendor(input: CreateVendorInput): Promise<Act
 }
 
 function parseSubmitExpenseRpc(data: unknown): { ok: true; status: string; message: string } | { ok: false; error: string } {
-  const row = data as { success?: boolean; message?: string; status?: string }
-  if (row.success === false) return { ok: false, error: row.message ?? 'Gagal memproses approval' }
+  const row = data as { success?: boolean; message?: string; status?: string; code?: string; wallet_balance?: string | number | null }
+  if (row.success === false) {
+    if (row.code === 'MAX_EXPENSE_IS_CURRENT_WALLET') {
+      const max = row.wallet_balance != null ? `Rp ${Math.round(Number(row.wallet_balance)).toLocaleString('id-ID')}` : null
+      return { ok: false, error: max ? `Maksimal pengeluaran = ${max} (saldo wallet saat ini)` : (row.message ?? 'Nominal melebihi saldo wallet petty cash') }
+    }
+    return { ok: false, error: row.message ?? 'Gagal memproses approval' }
+  }
   return { ok: true, status: row.status ?? '', message: row.message ?? '' }
 }
 
 function parseCreateSubmitRpc(data: unknown): { ok: true; id: string; ref_no: string | null; status: string; message: string } | { ok: false; error: string } {
-  const row = data as { success?: boolean; message?: string; status?: string; id?: string; ref_no?: string | null }
-  if (row.success === false) return { ok: false, error: row.message ?? 'Gagal membuat expense' }
+  const row = data as {
+    success?: boolean
+    message?: string
+    status?: string
+    id?: string
+    ref_no?: string | null
+    code?: string
+    wallet_balance?: string | number | null
+  }
+  if (row.success === false) {
+    if (row.code === 'MAX_EXPENSE_IS_CURRENT_WALLET') {
+      const max = row.wallet_balance != null ? `Rp ${Math.round(Number(row.wallet_balance)).toLocaleString('id-ID')}` : null
+      return { ok: false, error: max ? `Maksimal pengeluaran = ${max} (saldo wallet saat ini)` : (row.message ?? 'Nominal melebihi saldo wallet petty cash') }
+    }
+    return { ok: false, error: row.message ?? 'Gagal membuat expense' }
+  }
   if (!row.id) return { ok: false, error: 'Respons create expense tidak valid' }
   return { ok: true, id: row.id, ref_no: row.ref_no ?? null, status: row.status ?? '', message: row.message ?? '' }
 }
@@ -147,7 +167,15 @@ async function uploadExpenseFileToStorage(params: {
     })
 
   if (uploadError) {
-    return { success: false, error: uploadError.message }
+    const msg = uploadError.message
+    if (msg === 'Bucket not found' || /bucket not found/i.test(msg)) {
+      return {
+        success: false,
+        error:
+          'Storage bucket "expense-documents" belum ada. Jalankan migrasi Supabase terbaru (supabase db reset / migration up) atau buat bucket tersebut di Dashboard → Storage.',
+      }
+    }
+    return { success: false, error: msg }
   }
 
   const {

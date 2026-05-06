@@ -24,6 +24,8 @@ interface ExpenseFormProps {
   expenseId?: string
   initialValues?: Partial<ExpenseFormValues>
   existingDocumentUrl?: string | null
+  pettyCashMaxAmount?: string | null
+  canViewPettyCashBalance?: boolean
 }
 type DocumentOcrPhase = 'idle' | 'scanning' | 'success' | 'error'
 
@@ -192,6 +194,8 @@ export function ExpenseForm({
   expenseId,
   initialValues,
   existingDocumentUrl,
+  pettyCashMaxAmount = null,
+  canViewPettyCashBalance = false,
 }: ExpenseFormProps) {
   const router = useRouter()
   const [filePreview, setFilePreview] = useState<FilePreview | null>(null)
@@ -222,14 +226,27 @@ export function ExpenseForm({
   const [ocrLowFields, setOcrLowFields] = useState<string[] | null>(null)
   const { fillFromOcr } = useOcrFill(setValue)
 
-  const [amount, vat, adminFee, serviceFee, categoryId, hasVat] = useWatch({
+  const [amount, vat, adminFee, serviceFee, categoryId, hasVat, paymentMethod] = useWatch({
     control,
-    name: ['amount', 'vat', 'admin_fee', 'service_fee', 'category_id', 'has_vat'],
+    name: ['amount', 'vat', 'admin_fee', 'service_fee', 'category_id', 'has_vat', 'payment_method'],
   })
   const [amountInput, vatInput, adminFeeInput, serviceFeeInput] = useWatch({
     control,
     name: ['amount', 'vat', 'admin_fee', 'service_fee'],
   })
+
+  const totalPayment = calculateTotalPayment(amount || '0', vat || '0', adminFee || '0', serviceFee || '0')
+  const maxPettyCash = pettyCashMaxAmount == null ? null : Number(pettyCashMaxAmount)
+  const isPettyCash = paymentMethod === 'Petty Cash'
+  const isOverPettyCashLimit =
+    isPettyCash &&
+    maxPettyCash != null &&
+    Number.isFinite(maxPettyCash) &&
+    Number(totalPayment) > maxPettyCash
+  const pettyCashLimitMessage =
+    maxPettyCash != null && Number.isFinite(maxPettyCash)
+      ? `Maksimal pengeluaran = ${formatIDR(maxPettyCash.toFixed(2))} (saldo wallet saat ini)`
+      : 'Maksimal pengeluaran = saldo wallet saat ini'
 
   // Filter subcat by selected category
   const filteredSubcats = categoryId ? subcategories.filter(s => s.category_id === categoryId) : subcategories
@@ -284,6 +301,8 @@ export function ExpenseForm({
           : null,
       )
 
+      setValue('document', result.file, { shouldValidate: true, shouldDirty: true })
+
       setOcrPhase('scanning')
       try {
         const { postReceiptOcrFromFile } = await import('@/lib/ocr/receipt-ocr-client')
@@ -303,12 +322,17 @@ export function ExpenseForm({
       if (myGen !== uploadGenRef.current) return
       const msg = e instanceof Error ? e.message : 'Gagal memproses file'
       setFilePreview(prev => (prev ? { ...prev, error: msg, isCompressing: false } : null))
+      setValue('document', null, { shouldValidate: true })
       setError('document', { message: msg })
       setOcrPhase('idle')
     }
-  }, [clearErrors, setError, fillFromOcr])
+  }, [clearErrors, setError, setValue, fillFromOcr])
 
   const onSubmit = async (values: ExpenseFormValues) => {
+    if (isOverPettyCashLimit) {
+      setSubmitResult({ type: 'error', message: pettyCashLimitMessage })
+      return
+    }
     setIsSubmitting(true); setSubmitResult(null)
     try {
       const vatEffective = values.has_vat ? (values.vat || '0') : '0'
@@ -449,6 +473,7 @@ export function ExpenseForm({
               onRemove={() => {
                 clearDocumentOcr()
                 setFilePreview(null)
+                setValue('document', null, { shouldValidate: true })
                 clearErrors('document')
               }}
               ocrPhase={ocrPhase}
@@ -640,6 +665,23 @@ export function ExpenseForm({
                   <option value="">Pilih metode...</option>
                   {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
+                {isPettyCash && (
+                  <div
+                    style={{
+                      marginTop: '8px',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: `1px solid ${isOverPettyCashLimit ? '#FECACA' : '#BBF7D0'}`,
+                      background: isOverPettyCashLimit ? '#FEF2F2' : '#F0FDF4',
+                      fontSize: '11px',
+                      color: isOverPettyCashLimit ? '#B91C1C' : '#166534',
+                    }}
+                  >
+                    {canViewPettyCashBalance && maxPettyCash != null
+                      ? `Saldo wallet petty cash saat ini: ${formatIDR(maxPettyCash.toFixed(2))}`
+                      : 'Wallet petty cash akan divalidasi saat submit.'}
+                  </div>
+                )}
               </Field>
             </div>
           </Section>
@@ -679,6 +721,21 @@ export function ExpenseForm({
               </Field>
             </div>
             <div style={{ marginTop: '16px' }}>
+              {isOverPettyCashLimit && (
+                <div
+                  style={{
+                    marginBottom: '12px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid #FECACA',
+                    background: '#FEF2F2',
+                    color: '#B91C1C',
+                    fontSize: '12px',
+                  }}
+                >
+                  {pettyCashLimitMessage}
+                </div>
+              )}
               <TotalBreakdown amount={amount || ''} vat={vat || ''} adminFee={adminFee || ''} serviceFee={serviceFee || ''} />
             </div>
           </Section>
@@ -701,8 +758,8 @@ export function ExpenseForm({
                 setSubmitResult(null)
               }}
                 style={{ padding: '8px 16px', fontSize: '13px', background: '#fff', border: '1px solid #E2E8F0', borderRadius: '8px', cursor: 'pointer', color: '#475569' }}>Reset</button>
-              <button type="submit" disabled={isSubmitting || !!filePreview?.isCompressing || ocrPhase === 'scanning'}
-                style={{ padding: '8px 24px', fontSize: '13px', fontWeight: '500', minWidth: '130px', background: isSubmitting ? '#94A3B8' : '#0F172A', color: '#fff', border: 'none', borderRadius: '8px', cursor: isSubmitting ? 'not-allowed' : 'pointer' }}>
+              <button type="submit" disabled={isSubmitting || !!filePreview?.isCompressing || ocrPhase === 'scanning' || isOverPettyCashLimit}
+                style={{ padding: '8px 24px', fontSize: '13px', fontWeight: '500', minWidth: '130px', background: (isSubmitting || isOverPettyCashLimit) ? '#94A3B8' : '#0F172A', color: '#fff', border: 'none', borderRadius: '8px', cursor: (isSubmitting || isOverPettyCashLimit) ? 'not-allowed' : 'pointer' }}>
                 {isSubmitting ? 'Menyimpan...' : mode === 'edit' ? 'Simpan perubahan' : 'Ajukan Expense'}
               </button>
             </div>
