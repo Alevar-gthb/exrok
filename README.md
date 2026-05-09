@@ -1,7 +1,5 @@
 # Exrok — Integrated Expense & Inventory System
 
-Roketin & Spacehub Internal Ops Platform
-
 ## Tech Stack
 
 - **Framework:** Next.js 14+ (App Router) + TypeScript
